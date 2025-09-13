@@ -28,7 +28,44 @@ main > * {
   margin: 10px 0px;
 }
 
-/* Tab styles */
+/* Mode tab styles */
+.modeTabContainer {
+  display: flex;
+  border-bottom: 2px solid #ccc;
+  margin-bottom: 20px;
+  background: #f8f8f8;
+  padding: 0;
+}
+
+.modeTab {
+  background: #e8e8e8;
+  border: 2px solid #ccc;
+  border-bottom: none;
+  padding: 12px 20px;
+  cursor: pointer;
+  margin-right: 4px;
+  border-radius: 8px 8px 0 0;
+  font-weight: bold;
+  transition: background-color 0.2s;
+}
+
+.modeTab.active {
+  background: white;
+  border-bottom: 2px solid white;
+  margin-bottom: -2px;
+  color: #333;
+}
+
+.modeTab:hover:not(.active) {
+  background: #d8d8d8;
+}
+
+/* Content container */
+.contentContainer {
+  min-height: 400px;
+}
+
+/* Tab styles for input methods */
 .tabContainer {
   display: flex;
   border-bottom: 1px solid #ccc;
@@ -64,4 +101,132 @@ main > * {
 
 .drawingCanvasComponent {
   margin: 10px 0;
+}
+
+/* Image editor styles */
+.imageEditorCanvas {
+  background: white;
+  display: block;
+  margin: 10px 0;
+}
+
+.imageEditorComponent {
+  margin: 10px 0;
+}
+
+/* Dungeon crawler styles */
+.dungeonCrawlerComponent {
+  margin: 10px 0;
+}
+
+.dungeonGameCanvas {
+  background: #000;
+  display: block;
+  margin: 10px 0;
+  border: 2px solid #333;
+}
+
+.gameUI {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.healthBar {
+  background: #f0f0f0;
+  border: 2px solid #333;
+  padding: 10px;
+  border-radius: 8px;
+  min-width: 200px;
+}
+
+.healthLabel {
+  font-weight: bold;
+  margin-bottom: 5px;
+  display: block;
+}
+
+.healthValue {
+  font-size: 18px;
+  color: #d00;
+  font-weight: bold;
+}
+
+.inventory {
+  background: #f0f0f0;
+  border: 2px solid #333;
+  padding: 10px;
+  border-radius: 8px;
+  min-width: 150px;
+}
+
+.inventoryItem {
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.controls {
+  background: #f0f0f0;
+  border: 2px solid #333;
+  padding: 10px;
+  border-radius: 8px;
+  min-width: 200px;
+}
+
+.controls h4 {
+  margin-top: 0;
+  color: #333;
+}
+
+.controls p {
+  margin: 5px 0;
+  font-size: 14px;
+}
+
+/* Button styles */
+input[type="button"] {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-right: 8px;
+  transition: background-color 0.2s;
+}
+
+input[type="button"]:hover:not(:disabled) {
+  background: #45a049;
+}
+
+input[type="button"]:disabled {
+  background: #cccccc;
+  cursor: not-allowed;
+}
+
+input[type="button"]:active:not(:disabled) {
+  background: #3e8e41;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .gameUI {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modeTab {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  .dungeonGameCanvas {
+    width: 100%;
+    max-width: 400px;
+    height: auto;
+  }
 }

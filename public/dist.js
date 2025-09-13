@@ -1328,25 +1328,1063 @@ System.register("components/drawingCanvas", ["util", "components/common"], funct
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas"], function (exports_17, context_17) {
+System.register("components/imageEditor", ["util", "components/common"], function (exports_17, context_17) {
     "use strict";
-    var run_1, util_5, wfcOptions_1, presetPicker_1, drawingCanvas_1, wfc, canvas, wfcOptions, inputBitmap, start, tabContainer, presetTab, drawTab, inputContainer, presetPicker, drawingCanvas, restartWfc, downloadButton, mainElem;
+    var util_5, common_4;
     var __moduleName = context_17 && context_17.id;
-    // Tab switching logic
-    function switchTab(activeTab, inactiveTab, showElement) {
+    function createImageEditor() {
+        const component = {
+            domElement: Object.assign(document.createElement("div"), { className: "imageEditorComponent" }),
+            loadImage: (imageData) => {
+                canvas.width = imageData.width;
+                canvas.height = imageData.height;
+                ctx.putImageData(imageData, 0, 0);
+                updateCanvasDisplay();
+            },
+            getImageData: () => {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                return imageData;
+            },
+            clear: () => {
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        };
+        // Drawing state
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentTool = 'pen';
+        let currentColor = '#000000';
+        let lineWidth = 2;
+        let startX = 0;
+        let startY = 0;
+        let scaleFactor = 8; // Smaller scale for larger images
+        // Create canvas
+        const canvas = document.createElement("canvas");
+        canvas.className = "imageEditorCanvas";
+        canvas.style.border = "1px solid #ccc";
+        canvas.style.cursor = "crosshair";
+        canvas.style.imageRendering = "pixelated";
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Tool selection
+        const toolSelect = document.createElement("select");
+        toolSelect.innerHTML = `
+    <option value="pen">Pen</option>
+    <option value="eraser">Eraser</option>
+    <option value="bucket">Paint Bucket</option>
+    <option value="rectangle">Rectangle</option>
+    <option value="circle">Circle</option>
+    <option value="line">Line</option>
+    <option value="spray">Spray</option>
+  `;
+        toolSelect.value = currentTool;
+        toolSelect.onchange = () => {
+            currentTool = toolSelect.value;
+            canvas.style.cursor = currentTool === 'eraser' ? 'not-allowed' :
+                currentTool === 'bucket' ? 'pointer' : 'crosshair';
+        };
+        // Color picker
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = currentColor;
+        colorInput.onchange = () => {
+            currentColor = colorInput.value;
+        };
+        // Line width slider
+        const widthLabel = document.createElement("label");
+        widthLabel.textContent = "Size: ";
+        const widthInput = document.createElement("input");
+        widthInput.type = "range";
+        widthInput.min = "1";
+        widthInput.max = "20";
+        widthInput.value = lineWidth.toString();
+        widthInput.oninput = () => {
+            lineWidth = parseInt(widthInput.value);
+        };
+        // Scale slider
+        const scaleLabel = document.createElement("label");
+        scaleLabel.textContent = "Zoom: ";
+        const scaleInput = document.createElement("input");
+        scaleInput.type = "range";
+        scaleInput.min = "4";
+        scaleInput.max = "32";
+        scaleInput.value = scaleFactor.toString();
+        scaleInput.oninput = () => {
+            scaleFactor = parseInt(scaleInput.value);
+            updateCanvasDisplay();
+        };
+        // Clear button
+        const clearButton = document.createElement("input");
+        clearButton.type = "button";
+        clearButton.value = "Clear Canvas";
+        clearButton.onclick = () => {
+            component.clear();
+        };
+        // Use edited image button
+        const useEditedButton = document.createElement("input");
+        useEditedButton.type = "button";
+        useEditedButton.value = "Use Edited Image";
+        useEditedButton.onclick = () => {
+            const imageData = component.getImageData();
+            if (imageData && component.onEditComplete) {
+                component.onEditComplete(imageData);
+            }
+        };
+        // Helper functions
+        function updateCanvasDisplay() {
+            canvas.style.width = `${canvas.width * scaleFactor}px`;
+            canvas.style.height = `${canvas.height * scaleFactor}px`;
+        }
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+        // Drawing functions
+        function startDrawing(e) {
+            isDrawing = true;
+            const coords = getCanvasCoordinates(e);
+            [lastX, lastY] = [coords.x, coords.y];
+            [startX, startY] = [coords.x, coords.y];
+            if ((currentTool === 'pen' || currentTool === 'eraser') && lineWidth === 1) {
+                // For pixel-perfect pen with size 1, draw immediately on click
+                ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+                ctx.fillRect(Math.floor(coords.x), Math.floor(coords.y), 1, 1);
+            }
+            else if (currentTool === 'pen' || currentTool === 'eraser') {
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+            }
+            else if (currentTool === 'bucket') {
+                // For bucket tool, fill immediately on click
+                floodFill(Math.floor(coords.x), Math.floor(coords.y), currentColor);
+                isDrawing = false;
+            }
+        }
+        function draw(e) {
+            if (!isDrawing)
+                return;
+            const coords = getCanvasCoordinates(e);
+            const x = coords.x;
+            const y = coords.y;
+            ctx.strokeStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+            switch (currentTool) {
+                case 'pen':
+                case 'eraser':
+                    if (lineWidth === 1) {
+                        // Pixel-perfect drawing for size 1 - only draw if moved to a different pixel
+                        const currentPixelX = Math.floor(x);
+                        const currentPixelY = Math.floor(y);
+                        const lastPixelX = Math.floor(lastX);
+                        const lastPixelY = Math.floor(lastY);
+                        if (currentPixelX !== lastPixelX || currentPixelY !== lastPixelY) {
+                            ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+                            ctx.fillRect(currentPixelX, currentPixelY, 1, 1);
+                        }
+                    }
+                    else {
+                        // Normal line drawing for larger sizes
+                        ctx.lineWidth = lineWidth;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.lineTo(x, y);
+                        ctx.stroke();
+                    }
+                    break;
+                case 'spray':
+                    sprayPaint(x, y);
+                    break;
+            }
+            [lastX, lastY] = [x, y];
+        }
+        function stopDrawing(e) {
+            if (!isDrawing)
+                return;
+            isDrawing = false;
+            const coords = getCanvasCoordinates(e);
+            const x = coords.x;
+            const y = coords.y;
+            switch (currentTool) {
+                case 'rectangle':
+                    drawRectangle(startX, startY, x, y);
+                    break;
+                case 'circle':
+                    drawCircle(startX, startY, x, y);
+                    break;
+                case 'line':
+                    drawLine(startX, startY, x, y);
+                    break;
+            }
+        }
+        function sprayPaint(x, y) {
+            const density = 50;
+            const radius = lineWidth * 2;
+            for (let i = 0; i < density; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * radius;
+                const sprayX = x + Math.cos(angle) * distance;
+                const sprayY = y + Math.sin(angle) * distance;
+                ctx.fillStyle = currentColor;
+                ctx.beginPath();
+                ctx.arc(sprayX, sprayY, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        function drawRectangle(x1, y1, x2, y2) {
+            const width = x2 - x1;
+            const height = y2 - y1;
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.strokeRect(x1, y1, width, height);
+        }
+        function drawCircle(x1, y1, x2, y2) {
+            const radius = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.arc(x1, y1, radius, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        function drawLine(x1, y1, x2, y2) {
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+        function floodFill(startX, startY, fillColor) {
+            // Get the image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            // Convert fill color to RGB
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.fillStyle = fillColor;
+            tempCtx.fillRect(0, 0, 1, 1);
+            const fillData = tempCtx.getImageData(0, 0, 1, 1).data;
+            const fillR = fillData[0];
+            const fillG = fillData[1];
+            const fillB = fillData[2];
+            // Get the color we're replacing
+            const startIndex = (startY * canvas.width + startX) * 4;
+            const targetR = data[startIndex];
+            const targetG = data[startIndex + 1];
+            const targetB = data[startIndex + 2];
+            // Don't fill if the target color is the same as fill color
+            if (targetR === fillR && targetG === fillG && targetB === fillB) {
+                return;
+            }
+            // Flood fill using stack-based approach
+            const stack = [[startX, startY]];
+            const visited = new Set();
+            while (stack.length > 0) {
+                const [x, y] = stack.pop();
+                const key = `${x},${y}`;
+                if (visited.has(key) || x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
+                    continue;
+                }
+                const index = (y * canvas.width + x) * 4;
+                const r = data[index];
+                const g = data[index + 1];
+                const b = data[index + 2];
+                // Check if this pixel matches the target color
+                if (r === targetR && g === targetG && b === targetB) {
+                    // Fill the pixel
+                    data[index] = fillR;
+                    data[index + 1] = fillG;
+                    data[index + 2] = fillB;
+                    data[index + 3] = 255; // Alpha
+                    visited.add(key);
+                    // Add adjacent pixels to stack
+                    stack.push([x + 1, y]);
+                    stack.push([x - 1, y]);
+                    stack.push([x, y + 1]);
+                    stack.push([x, y - 1]);
+                }
+            }
+            // Put the modified image data back
+            ctx.putImageData(imageData, 0, 0);
+        }
+        // Event listeners
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        // Build DOM
+        util_5.buildDomTree(component.domElement, [
+            document.createElement("p"), [
+                "Edit the generated image. Add player start/end points and polish the dungeon layout."
+            ],
+            common_4.inputGroup(), [
+                document.createElement("label"), ["Tool: ", toolSelect],
+                document.createElement("label"), ["Color: ", colorInput],
+                widthLabel, widthInput,
+                scaleLabel, scaleInput,
+            ],
+            common_4.inputGroup(), [
+                clearButton,
+                useEditedButton,
+            ],
+            canvas,
+        ]);
+        return component;
+    }
+    exports_17("createImageEditor", createImageEditor);
+    return {
+        setters: [
+            function (util_5_1) {
+                util_5 = util_5_1;
+            },
+            function (common_4_1) {
+                common_4 = common_4_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+System.register("colorMapping", [], function (exports_18, context_18) {
+    "use strict";
+    var GameElement, DEFAULT_COLOR_MAPPINGS;
+    var __moduleName = context_18 && context_18.id;
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : null;
+    }
+    exports_18("hexToRgb", hexToRgb);
+    function rgbToHex(r, g, b) {
+        return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+    exports_18("rgbToHex", rgbToHex);
+    function colorDistance(color1, color2) {
+        return Math.sqrt(Math.pow(color1.r - color2.r, 2) +
+            Math.pow(color1.g - color2.g, 2) +
+            Math.pow(color1.b - color2.b, 2));
+    }
+    exports_18("colorDistance", colorDistance);
+    // Find the closest matching color from the mapping
+    function findClosestColor(r, g, b, mappings) {
+        const targetColor = { r, g, b };
+        let closestElement = GameElement.FLOOR; // Default
+        let minDistance = Infinity;
+        for (const [hexColor, element] of Object.entries(mappings)) {
+            const rgbColor = hexToRgb(hexColor);
+            if (rgbColor) {
+                const distance = colorDistance(targetColor, rgbColor);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestElement = element;
+                }
+            }
+        }
+        return closestElement;
+    }
+    exports_18("findClosestColor", findClosestColor);
+    // Convert image data to game map
+    function imageDataToGameMap(imageData, mappings = DEFAULT_COLOR_MAPPINGS) {
+        const { data, width, height } = imageData;
+        const gameMap = [];
+        for (let y = 0; y < height; y++) {
+            const row = [];
+            for (let x = 0; x < width; x++) {
+                const index = (y * width + x) * 4;
+                const r = data[index];
+                const g = data[index + 1];
+                const b = data[index + 2];
+                const element = findClosestColor(r, g, b, mappings);
+                row.push(element);
+            }
+            gameMap.push(row);
+        }
+        return gameMap;
+    }
+    exports_18("imageDataToGameMap", imageDataToGameMap);
+    // Find player start position
+    function findPlayerStart(gameMap) {
+        for (let y = 0; y < gameMap.length; y++) {
+            for (let x = 0; x < gameMap[y].length; x++) {
+                if (gameMap[y][x] === GameElement.PLAYER_START) {
+                    return { x, y };
+                }
+            }
+        }
+        return null;
+    }
+    exports_18("findPlayerStart", findPlayerStart);
+    // Find player finish position
+    function findPlayerFinish(gameMap) {
+        for (let y = 0; y < gameMap.length; y++) {
+            for (let x = 0; x < gameMap[y].length; x++) {
+                if (gameMap[y][x] === GameElement.PLAYER_FINISH) {
+                    return { x, y };
+                }
+            }
+        }
+        return null;
+    }
+    exports_18("findPlayerFinish", findPlayerFinish);
+    // Get all enemy positions
+    function findEnemies(gameMap) {
+        const enemies = [];
+        for (let y = 0; y < gameMap.length; y++) {
+            for (let x = 0; x < gameMap[y].length; x++) {
+                if (gameMap[y][x] === GameElement.ENEMY) {
+                    enemies.push({ x, y });
+                }
+            }
+        }
+        return enemies;
+    }
+    exports_18("findEnemies", findEnemies);
+    // Check if a position is walkable (not a wall)
+    function isWalkable(gameMap, x, y) {
+        if (y < 0 || y >= gameMap.length || x < 0 || x >= gameMap[y].length) {
+            return false;
+        }
+        const element = gameMap[y][x];
+        return element !== GameElement.WALL && element !== GameElement.DOOR;
+    }
+    exports_18("isWalkable", isWalkable);
+    function getElementProperties(element) {
+        switch (element) {
+            case GameElement.WALL:
+                return {
+                    walkable: false,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "A solid wall blocking your path."
+                };
+            case GameElement.DANGER:
+                return {
+                    walkable: true,
+                    dangerous: true,
+                    collectible: false,
+                    interactive: false,
+                    description: "Dangerous terrain that damages you when stepped on."
+                };
+            case GameElement.WATER:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Water that slows your movement."
+                };
+            case GameElement.ENEMY:
+                return {
+                    walkable: true,
+                    dangerous: true,
+                    collectible: false,
+                    interactive: true,
+                    description: "An enemy that will attack you on sight."
+                };
+            case GameElement.GRASS:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Soft grass that cushions your steps."
+                };
+            case GameElement.FIRE:
+                return {
+                    walkable: true,
+                    dangerous: true,
+                    collectible: false,
+                    interactive: false,
+                    description: "Burning fire that damages you when stepped on."
+                };
+            case GameElement.PLAYER_START:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Your starting position in the dungeon."
+                };
+            case GameElement.PLAYER_FINISH:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: true,
+                    description: "The exit from the dungeon."
+                };
+            case GameElement.TREASURE:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: true,
+                    interactive: false,
+                    description: "Valuable treasure waiting to be collected."
+                };
+            case GameElement.KEY:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: true,
+                    interactive: false,
+                    description: "A key that can open locked doors."
+                };
+            case GameElement.DOOR:
+                return {
+                    walkable: false,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: true,
+                    description: "A locked door that requires a key to open."
+                };
+            case GameElement.STAIRS:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: true,
+                    description: "Stairs leading to another level."
+                };
+            case GameElement.FLOOR:
+            default:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Regular dungeon floor."
+                };
+        }
+    }
+    exports_18("getElementProperties", getElementProperties);
+    return {
+        setters: [],
+        execute: function () {
+            // Color mapping system for converting image colors to game elements
+            (function (GameElement) {
+                GameElement["WALL"] = "wall";
+                GameElement["DANGER"] = "danger";
+                GameElement["WATER"] = "water";
+                GameElement["ENEMY"] = "enemy";
+                GameElement["GRASS"] = "grass";
+                GameElement["FIRE"] = "fire";
+                GameElement["PLAYER_START"] = "player_start";
+                GameElement["PLAYER_FINISH"] = "player_finish";
+                GameElement["FLOOR"] = "floor";
+                GameElement["TREASURE"] = "treasure";
+                GameElement["KEY"] = "key";
+                GameElement["DOOR"] = "door";
+                GameElement["STAIRS"] = "stairs";
+            })(GameElement || (exports_18("GameElement", GameElement = {})));
+            // Default color mappings based on user requirements
+            exports_18("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
+                '#000000': GameElement.WALL, // Black - wall
+                '#FF0000': GameElement.DANGER, // Red - danger
+                '#0000FF': GameElement.WATER, // Blue - water
+                '#800080': GameElement.ENEMY, // Purple - enemy
+                '#008000': GameElement.GRASS, // Green - grass
+                '#FFA500': GameElement.FIRE, // Orange - fire
+                '#006400': GameElement.PLAYER_START, // Dark green - player start
+                '#8B0000': GameElement.PLAYER_FINISH, // Dark red - player finish
+                // Additional mappings for more variety
+                '#FFFF00': GameElement.TREASURE, // Yellow - treasure
+                '#FFD700': GameElement.KEY, // Gold - key
+                '#8B4513': GameElement.DOOR, // Brown - door
+                '#C0C0C0': GameElement.STAIRS, // Silver - stairs
+                '#FFFFFF': GameElement.FLOOR, // White - floor (default)
+            });
+        }
+    };
+});
+System.register("components/dungeonCrawler", ["util", "colorMapping"], function (exports_19, context_19) {
+    "use strict";
+    var util_6, colorMapping_1;
+    var __moduleName = context_19 && context_19.id;
+    function createDungeonCrawler() {
+        const component = {
+            domElement: Object.assign(document.createElement("div"), { className: "dungeonCrawlerComponent" }),
+            startGame: (gameMap, playerStart) => {
+                currentGameMap = gameMap;
+                player.x = playerStart.x + 0.5;
+                player.y = playerStart.y + 0.5;
+                player.angle = 0;
+                player.health = player.maxHealth;
+                player.keys = 0;
+                player.treasures = 0;
+                enemies = [];
+                gameRunning = true;
+                lastFrameTime = Date.now();
+                gameLoop();
+            },
+            stopGame: () => {
+                gameRunning = false;
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+            }
+        };
+        // Game state
+        let currentGameMap = [];
+        let gameRunning = false;
+        let animationFrameId;
+        let lastFrameTime = 0;
+        // Player state
+        const player = {
+            x: 0,
+            y: 0,
+            angle: 0,
+            health: 100,
+            maxHealth: 100,
+            keys: 0,
+            treasures: 0
+        };
+        // Enemy state
+        let enemies = [];
+        // Game constants
+        const CANVAS_WIDTH = 800;
+        const CANVAS_HEIGHT = 600;
+        const FOV = Math.PI / 3; // 60 degrees field of view
+        const WALL_HEIGHT = 2.0; // Made walls taller
+        const PLAYER_HEIGHT = 0.5;
+        const MOVE_SPEED = 0.05;
+        const ROTATE_SPEED = 0.04; // Slightly faster rotation
+        // Input state
+        const keysPressed = new Set();
+        // Create canvases
+        const gameCanvas = document.createElement("canvas");
+        gameCanvas.width = CANVAS_WIDTH;
+        gameCanvas.height = CANVAS_HEIGHT;
+        gameCanvas.className = "dungeonGameCanvas";
+        gameCanvas.style.border = "1px solid #ccc";
+        gameCanvas.style.backgroundColor = "#000";
+        const ctx = gameCanvas.getContext("2d");
+        // UI elements
+        const healthBar = document.createElement("div");
+        healthBar.className = "healthBar";
+        healthBar.innerHTML = `
+    <div class="healthLabel">Health:</div>
+    <div class="healthValue">100/100</div>
+  `;
+        const inventory = document.createElement("div");
+        inventory.className = "inventory";
+        inventory.innerHTML = `
+    <div class="inventoryItem">Keys: <span id="keyCount">0</span></div>
+    <div class="inventoryItem">Treasures: <span id="treasureCount">0</span></div>
+  `;
+        const controls = document.createElement("div");
+        controls.className = "controls";
+        controls.innerHTML = `
+    <h4>Controls:</h4>
+    <p>WASD - Move</p>
+    <p>A/D or Left/Right arrows - Turn</p>
+    <p>Space - Attack</p>
+    <p>E - Interact</p>
+  `;
+        // Input handling
+        function handleKeyDown(e) {
+            keysPressed.add(e.code.toLowerCase());
+        }
+        function handleKeyUp(e) {
+            keysPressed.delete(e.code.toLowerCase());
+        }
+        function handleMouseMove(e) {
+            // Mouse movement disabled - using keyboard for turning
+        }
+        // Game logic
+        function updatePlayer() {
+            let newX = player.x;
+            let newY = player.y;
+            // Handle movement
+            if (keysPressed.has('keyw') || keysPressed.has('arrowup')) {
+                newX += Math.cos(player.angle) * MOVE_SPEED;
+                newY += Math.sin(player.angle) * MOVE_SPEED;
+            }
+            if (keysPressed.has('keys') || keysPressed.has('arrowdown')) {
+                newX -= Math.cos(player.angle) * MOVE_SPEED;
+                newY -= Math.sin(player.angle) * MOVE_SPEED;
+            }
+            if (keysPressed.has('keya') || keysPressed.has('arrowleft')) {
+                newX += Math.cos(player.angle - Math.PI / 2) * MOVE_SPEED;
+                newY += Math.sin(player.angle - Math.PI / 2) * MOVE_SPEED;
+            }
+            if (keysPressed.has('keyd') || keysPressed.has('arrowright')) {
+                newX -= Math.cos(player.angle - Math.PI / 2) * MOVE_SPEED;
+                newY -= Math.sin(player.angle - Math.PI / 2) * MOVE_SPEED;
+            }
+            // Handle rotation - A/D or Left/Right arrows
+            if (keysPressed.has('keya') || keysPressed.has('arrowleft')) {
+                player.angle -= ROTATE_SPEED;
+            }
+            if (keysPressed.has('keyd') || keysPressed.has('arrowright')) {
+                player.angle += ROTATE_SPEED;
+            }
+            // Check collision and update position
+            if (isValidPosition(newX, newY)) {
+                player.x = newX;
+                player.y = newY;
+            }
+            // Check for interactions
+            const playerTileX = Math.floor(player.x);
+            const playerTileY = Math.floor(player.y);
+            if (playerTileX >= 0 && playerTileX < currentGameMap[0].length &&
+                playerTileY >= 0 && playerTileY < currentGameMap.length) {
+                const element = currentGameMap[playerTileY][playerTileX];
+                const properties = colorMapping_1.getElementProperties(element);
+                // Handle dangerous tiles
+                if (properties.dangerous && Math.random() < 0.01) { // 1% chance per frame
+                    player.health -= 5;
+                    if (player.health <= 0) {
+                        gameRunning = false;
+                        if (component.onGameOver) {
+                            component.onGameOver();
+                        }
+                    }
+                }
+                // Handle collectibles
+                if (properties.collectible) {
+                    if (element === colorMapping_1.GameElement.TREASURE) {
+                        player.treasures++;
+                        currentGameMap[playerTileY][playerTileX] = colorMapping_1.GameElement.FLOOR;
+                    }
+                    else if (element === colorMapping_1.GameElement.KEY) {
+                        player.keys++;
+                        currentGameMap[playerTileY][playerTileX] = colorMapping_1.GameElement.FLOOR;
+                    }
+                }
+                // Handle finish condition
+                if (element === colorMapping_1.GameElement.PLAYER_FINISH) {
+                    gameRunning = false;
+                    if (component.onGameComplete) {
+                        component.onGameComplete();
+                    }
+                }
+            }
+        }
+        function updateEnemies() {
+            const currentTime = Date.now();
+            enemies.forEach((enemy, index) => {
+                if (currentTime - enemy.lastMove > 1000) { // Move every second
+                    // Simple AI: move towards player
+                    const dx = player.x - enemy.x;
+                    const dy = player.y - enemy.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance > 0) {
+                        const moveX = (dx / distance) * 0.1;
+                        const moveY = (dy / distance) * 0.1;
+                        const newX = enemy.x + moveX;
+                        const newY = enemy.y + moveY;
+                        if (isValidPosition(newX, newY)) {
+                            enemy.x = newX;
+                            enemy.y = newY;
+                        }
+                    }
+                    enemy.lastMove = currentTime;
+                    // Check if enemy is close enough to attack
+                    if (distance < 0.5) {
+                        player.health -= 10;
+                        if (player.health <= 0) {
+                            gameRunning = false;
+                            if (component.onGameOver) {
+                                component.onGameOver();
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        function isValidPosition(x, y) {
+            const tileX = Math.floor(x);
+            const tileY = Math.floor(y);
+            if (tileX < 0 || tileX >= currentGameMap[0].length ||
+                tileY < 0 || tileY >= currentGameMap.length) {
+                return false;
+            }
+            const element = currentGameMap[tileY][tileX];
+            const properties = colorMapping_1.getElementProperties(element);
+            return properties.walkable;
+        }
+        // Rendering
+        function render() {
+            // Clear canvas
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            // Draw ceiling (darker)
+            ctx.fillStyle = "#2a2a2a";
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+            // Draw floor (lighter)
+            ctx.fillStyle = "#4a4a4a";
+            ctx.fillRect(0, CANVAS_HEIGHT / 2, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+            // Raycasting
+            const numRays = CANVAS_WIDTH;
+            const angleStep = FOV / numRays;
+            for (let i = 0; i < numRays; i++) {
+                const rayAngle = player.angle - FOV / 2 + angleStep * i;
+                const distance = castRay(rayAngle);
+                // Calculate wall height
+                const wallHeight = (WALL_HEIGHT / distance) * (CANVAS_HEIGHT / 2);
+                const wallTop = (CANVAS_HEIGHT / 2) - wallHeight / 2;
+                const wallBottom = (CANVAS_HEIGHT / 2) + wallHeight / 2;
+                // Choose wall color based on distance and element
+                const element = getWallElement(rayAngle, distance);
+                const color = getWallColor(element, distance);
+                ctx.fillStyle = color;
+                ctx.fillRect(i, wallTop, 1, wallBottom - wallTop);
+            }
+            // Draw UI
+            updateUI();
+        }
+        function castRay(angle) {
+            const dx = Math.cos(angle);
+            const dy = Math.sin(angle);
+            let x = player.x;
+            let y = player.y;
+            let distance = 0;
+            while (distance < 20) { // Max view distance
+                x += dx * 0.01;
+                y += dy * 0.01;
+                distance += 0.01;
+                const tileX = Math.floor(x);
+                const tileY = Math.floor(y);
+                if (tileX < 0 || tileX >= currentGameMap[0].length ||
+                    tileY < 0 || tileY >= currentGameMap.length) {
+                    return distance;
+                }
+                const element = currentGameMap[tileY][tileX];
+                const properties = colorMapping_1.getElementProperties(element);
+                if (!properties.walkable) {
+                    return distance;
+                }
+            }
+            return 20;
+        }
+        function getWallElement(angle, distance) {
+            const x = player.x + Math.cos(angle) * distance;
+            const y = player.y + Math.sin(angle) * distance;
+            const tileX = Math.floor(x);
+            const tileY = Math.floor(y);
+            if (tileX < 0 || tileX >= currentGameMap[0].length ||
+                tileY < 0 || tileY >= currentGameMap.length) {
+                return colorMapping_1.GameElement.WALL;
+            }
+            return currentGameMap[tileY][tileX];
+        }
+        function getWallColor(element, distance) {
+            // Distance fog
+            const fogFactor = Math.max(0, 1 - distance / 10);
+            const brightness = Math.floor(255 * fogFactor);
+            switch (element) {
+                case colorMapping_1.GameElement.WALL:
+                    return `rgb(${brightness}, ${brightness}, ${brightness})`;
+                case colorMapping_1.GameElement.DOOR:
+                    return `rgb(${brightness}, ${brightness * 0.5}, 0)`;
+                case colorMapping_1.GameElement.DANGER:
+                    return `rgb(${brightness}, ${brightness * 0.3}, ${brightness * 0.3})`;
+                case colorMapping_1.GameElement.FIRE:
+                    return `rgb(${brightness}, ${brightness * 0.5}, 0)`;
+                default:
+                    return `rgb(${brightness}, ${brightness}, ${brightness})`;
+            }
+        }
+        function updateUI() {
+            // Update health bar
+            const healthValue = healthBar.querySelector('.healthValue');
+            healthValue.textContent = `${Math.max(0, player.health)}/${player.maxHealth}`;
+            // Update inventory
+            const keyCount = inventory.querySelector('#keyCount');
+            const treasureCount = inventory.querySelector('#treasureCount');
+            keyCount.textContent = player.keys.toString();
+            treasureCount.textContent = player.treasures.toString();
+        }
+        // Game loop
+        function gameLoop() {
+            if (!gameRunning)
+                return;
+            const currentTime = Date.now();
+            const deltaTime = currentTime - lastFrameTime;
+            lastFrameTime = currentTime;
+            updatePlayer();
+            updateEnemies();
+            render();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+        // Event listeners
+        document.addEventListener('keydown', handleKeyDown);
+        document.addEventListener('keyup', handleKeyUp);
+        // Removed mouse movement listener - using keyboard for turning
+        // Build DOM
+        const gameUIContainer = document.createElement("div");
+        gameUIContainer.className = "gameUI";
+        gameUIContainer.appendChild(healthBar);
+        gameUIContainer.appendChild(inventory);
+        gameUIContainer.appendChild(controls);
+        util_6.buildDomTree(component.domElement, [
+            document.createElement("p"), [
+                "Navigate through the dungeon! Avoid enemies and dangers, collect treasures and keys, and reach the finish."
+            ],
+            gameUIContainer,
+            gameCanvas,
+        ]);
+        return component;
+    }
+    exports_19("createDungeonCrawler", createDungeonCrawler);
+    return {
+        setters: [
+            function (util_6_1) {
+                util_6 = util_6_1;
+            },
+            function (colorMapping_1_1) {
+                colorMapping_1 = colorMapping_1_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/dungeonCrawler", "colorMapping"], function (exports_20, context_20) {
+    "use strict";
+    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, dungeonCrawler_1, colorMapping_2, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, inputContainer, presetPicker, drawingCanvas, imageEditor, dungeonCrawler, mainElem;
+    var __moduleName = context_20 && context_20.id;
+    // Tab switching logic for input tabs
+    function switchInputTab(activeTab, inactiveTab, showElement) {
         activeTab.classList.add("active");
         inactiveTab.classList.remove("active");
         // Clear and add the correct input method
         inputContainer.innerHTML = "";
         inputContainer.appendChild(showElement);
     }
+    // Mode switching logic
+    function switchMode(newMode) {
+        // Remove active class from all mode tabs
+        inputModeTab.classList.remove("active");
+        wfcModeTab.classList.remove("active");
+        editModeTab.classList.remove("active");
+        gameModeTab.classList.remove("active");
+        // Clear content container
+        contentContainer.innerHTML = "";
+        currentMode = newMode;
+        switch (newMode) {
+            case AppMode.INPUT:
+                inputModeTab.classList.add("active");
+                buildInputMode();
+                break;
+            case AppMode.WFC_GENERATION:
+                wfcModeTab.classList.add("active");
+                buildWFCGenerationMode();
+                break;
+            case AppMode.IMAGE_EDITING:
+                editModeTab.classList.add("active");
+                buildImageEditingMode();
+                break;
+            case AppMode.DUNGEON_CRAWLER:
+                gameModeTab.classList.add("active");
+                buildDungeonCrawlerMode();
+                break;
+        }
+    }
+    function buildInputMode() {
+        util_7.buildDomTree(contentContainer, [
+            document.createElement("h2"), ["Input bitmap"],
+            inputTabContainer, [
+                presetTab,
+                drawTab,
+            ],
+            inputContainer,
+            document.createElement("h2"), ["Options"],
+            wfcOptions.domElement,
+        ]);
+        // Initialize with preset picker
+        inputContainer.appendChild(presetPicker.domElement);
+    }
+    function buildWFCGenerationMode() {
+        const restartWfc = document.createElement("input");
+        restartWfc.type = "button";
+        restartWfc.value = "Restart Generation";
+        restartWfc.onclick = startWFC;
+        downloadButton = document.createElement("input");
+        downloadButton.type = "button";
+        downloadButton.value = "Download PNG";
+        downloadButton.disabled = true;
+        downloadButton.onclick = () => {
+            // Create a link element to trigger download
+            const link = document.createElement("a");
+            link.download = `wfc-output-${Date.now()}.png`;
+            link.href = canvas.toDataURL("image/png");
+            link.click();
+        };
+        editImageButton = document.createElement("input");
+        editImageButton.type = "button";
+        editImageButton.value = "Edit Generated Image";
+        editImageButton.disabled = true;
+        editImageButton.onclick = () => {
+            switchMode(AppMode.IMAGE_EDITING);
+        };
+        util_7.buildDomTree(contentContainer, [
+            document.createElement("h2"), ["Wave Function Collapse Generation"],
+            document.createElement("div"), [
+                restartWfc,
+                downloadButton,
+                editImageButton,
+            ],
+            canvas,
+        ]);
+    }
+    function buildImageEditingMode() {
+        if (generatedImageData) {
+            imageEditor.loadImage(generatedImageData);
+        }
+        util_7.buildDomTree(contentContainer, [
+            document.createElement("h2"), ["Edit Generated Image"],
+            document.createElement("p"), [
+                "Use the drawing tools to add player start (dark green) and finish (dark red) points, polish routes, and adjust the dungeon layout."
+            ],
+            imageEditor.domElement,
+        ]);
+    }
+    function buildDungeonCrawlerMode() {
+        util_7.buildDomTree(contentContainer, [
+            document.createElement("h2"), ["Dungeon Crawler Game"],
+            dungeonCrawler.domElement,
+        ]);
+    }
+    function startDungeonCrawler() {
+        if (!generatedImageData)
+            return;
+        // Convert image to game map
+        gameMap = colorMapping_2.imageDataToGameMap(generatedImageData);
+        // Find player start position
+        const playerStart = colorMapping_2.findPlayerStart(gameMap);
+        if (!playerStart) {
+            alert("No player start position found! Please add a dark green (#006400) pixel to mark the start.");
+            switchMode(AppMode.IMAGE_EDITING);
+            return;
+        }
+        // Find player finish position
+        const playerFinish = colorMapping_2.findPlayerFinish(gameMap);
+        if (!playerFinish) {
+            alert("No player finish position found! Please add a dark red (#8B0000) pixel to mark the finish.");
+            switchMode(AppMode.IMAGE_EDITING);
+            return;
+        }
+        // Start the game
+        dungeonCrawler.startGame(gameMap, playerStart);
+    }
     return {
         setters: [
             function (run_1_1) {
                 run_1 = run_1_1;
             },
-            function (util_5_1) {
-                util_5 = util_5_1;
+            function (util_7_1) {
+                util_7 = util_7_1;
             },
             function (wfcOptions_1_1) {
                 wfcOptions_1 = wfcOptions_1_1;
@@ -1356,15 +2394,33 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             },
             function (drawingCanvas_1_1) {
                 drawingCanvas_1 = drawingCanvas_1_1;
+            },
+            function (imageEditor_1_1) {
+                imageEditor_1 = imageEditor_1_1;
+            },
+            function (dungeonCrawler_1_1) {
+                dungeonCrawler_1 = dungeonCrawler_1_1;
+            },
+            function (colorMapping_2_1) {
+                colorMapping_2 = colorMapping_2_1;
             }
         ],
         execute: function () {
+            // Current application state
+            (function (AppMode) {
+                AppMode["INPUT"] = "input";
+                AppMode["WFC_GENERATION"] = "wfc_generation";
+                AppMode["IMAGE_EDITING"] = "image_editing";
+                AppMode["DUNGEON_CRAWLER"] = "dungeon_crawler";
+            })(AppMode || (AppMode = {}));
+            currentMode = AppMode.INPUT;
+            gameMap = [];
             canvas = document.createElement("canvas");
             canvas.className = "wfcOutput";
             canvas.width = 0;
             canvas.height = 0;
             wfcOptions = wfcOptions_1.createWfcOptions();
-            start = () => {
+            startWFC = () => {
                 if (wfc) {
                     wfc.stop();
                 }
@@ -1372,15 +2428,43 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                     return;
                 }
                 // Disable download button while generating
-                downloadButton.disabled = true;
+                if (downloadButton)
+                    downloadButton.disabled = true;
+                if (editImageButton)
+                    editImageButton.disabled = true;
                 wfc = run_1.createWaveFunctionCollapse(inputBitmap, canvas, wfcOptions.options, () => {
-                    // Enable download button when generation completes
-                    downloadButton.disabled = false;
+                    // Enable buttons when generation completes
+                    if (downloadButton)
+                        downloadButton.disabled = false;
+                    if (editImageButton)
+                        editImageButton.disabled = false;
+                    // Get the generated image data
+                    const ctx = canvas.getContext("2d");
+                    if (ctx) {
+                        generatedImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    }
                 });
             };
-            // Create input method tabs
-            tabContainer = document.createElement("div");
-            tabContainer.className = "tabContainer";
+            // Create mode tabs
+            modeTabContainer = document.createElement("div");
+            modeTabContainer.className = "modeTabContainer";
+            inputModeTab = document.createElement("button");
+            inputModeTab.textContent = "1. Create Input";
+            inputModeTab.className = "modeTab active";
+            wfcModeTab = document.createElement("button");
+            wfcModeTab.textContent = "2. Generate";
+            wfcModeTab.className = "modeTab";
+            editModeTab = document.createElement("button");
+            editModeTab.textContent = "3. Edit Image";
+            editModeTab.className = "modeTab";
+            gameModeTab = document.createElement("button");
+            gameModeTab.textContent = "4. Play Game";
+            gameModeTab.className = "modeTab";
+            contentContainer = document.createElement("div");
+            contentContainer.className = "contentContainer";
+            // Input mode content
+            inputTabContainer = document.createElement("div");
+            inputTabContainer.className = "tabContainer";
             presetTab = document.createElement("button");
             presetTab.textContent = "Preset Images";
             presetTab.className = "tab active";
@@ -1394,53 +2478,57 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             presetPicker.onPick = (image, options) => {
                 inputBitmap = image;
                 wfcOptions.updateOptions(options);
-                start();
+                switchMode(AppMode.WFC_GENERATION);
+                startWFC();
             };
             // Drawing canvas
             drawingCanvas = drawingCanvas_1.createDrawingCanvas();
             drawingCanvas.onDrawComplete = (image) => {
                 inputBitmap = image;
                 wfcOptions.updateOptions({}); // Reset to defaults for custom drawings
-                start();
+                switchMode(AppMode.WFC_GENERATION);
+                startWFC();
             };
-            presetTab.onclick = () => switchTab(presetTab, drawTab, presetPicker.domElement);
-            drawTab.onclick = () => switchTab(drawTab, presetTab, drawingCanvas.domElement);
-            // Initialize with preset picker
-            inputContainer.appendChild(presetPicker.domElement);
-            restartWfc = document.createElement("input");
-            restartWfc.type = "button";
-            restartWfc.value = "Restart Generation";
-            restartWfc.onclick = start;
-            downloadButton = document.createElement("input");
-            downloadButton.type = "button";
-            downloadButton.value = "Download PNG";
-            downloadButton.disabled = true;
-            downloadButton.onclick = () => {
-                // Create a link element to trigger download
-                const link = document.createElement("a");
-                link.download = `wfc-output-${Date.now()}.png`;
-                link.href = canvas.toDataURL("image/png");
-                link.click();
+            // Image editor
+            imageEditor = imageEditor_1.createImageEditor();
+            imageEditor.onEditComplete = (image) => {
+                generatedImageData = image;
+                switchMode(AppMode.DUNGEON_CRAWLER);
+                startDungeonCrawler();
             };
+            // Dungeon crawler
+            dungeonCrawler = dungeonCrawler_1.createDungeonCrawler();
+            dungeonCrawler.onGameComplete = () => {
+                alert("Congratulations! You completed the dungeon!");
+                switchMode(AppMode.INPUT);
+            };
+            dungeonCrawler.onGameOver = () => {
+                alert("Game Over! You died in the dungeon.");
+                switchMode(AppMode.INPUT);
+            };
+            presetTab.onclick = () => switchInputTab(presetTab, drawTab, presetPicker.domElement);
+            drawTab.onclick = () => switchInputTab(drawTab, presetTab, drawingCanvas.domElement);
+            // Mode tab event listeners
+            inputModeTab.onclick = () => switchMode(AppMode.INPUT);
+            wfcModeTab.onclick = () => switchMode(AppMode.WFC_GENERATION);
+            editModeTab.onclick = () => switchMode(AppMode.IMAGE_EDITING);
+            gameModeTab.onclick = () => switchMode(AppMode.DUNGEON_CRAWLER);
+            // Initialize the application
             mainElem = document.querySelector("main");
             if (mainElem) {
-                const content = util_5.buildDomTree(mainElem, [
-                    document.createElement("h2"), ["Input bitmap"],
-                    tabContainer, [
-                        presetTab,
-                        drawTab,
+                const content = util_7.buildDomTree(mainElem, [
+                    document.createElement("h2"), ["Wave Function Collapse Dungeon Generator"],
+                    modeTabContainer, [
+                        inputModeTab,
+                        wfcModeTab,
+                        editModeTab,
+                        gameModeTab,
                     ],
-                    inputContainer,
-                    document.createElement("h2"), ["Options"],
-                    wfcOptions.domElement,
-                    document.createElement("h2"), ["Output"],
-                    document.createElement("div"), [
-                        restartWfc,
-                        downloadButton,
-                    ],
-                    canvas,
+                    contentContainer,
                 ]);
                 mainElem.appendChild(content);
+                // Start with input mode
+                switchMode(AppMode.INPUT);
             }
         }
     };
