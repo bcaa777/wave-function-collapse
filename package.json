@@ -5,6 +5,19 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
+    "serve": "cd public && python3 -m http.server 8000",
+    "serve:3000": "cd public && python3 -m http.server 3000",
+    "serve:8080": "cd public && python3 -m http.server 8080",
+    "dev": "npm run build && npm run serve",
+    "dev:3000": "npm run build && npm run serve:3000",
+    "dev:8080": "npm run build && npm run serve:8080",
+    "kill-server": "pkill -f 'python3 -m http.server' || echo 'No server processes found'",
+    "clean-server": "npm run kill-server && sleep 2 && lsof -ti:8000 | xargs kill -9 2>/dev/null || echo 'Port 8000 cleaned'",
+    "start-server": "npm run clean-server && npm run dev",
+    "server-status": "lsof -i :8000 2>/dev/null && echo '✅ Server is running on port 8000' || echo '❌ No server running on port 8000'",
+    "force-clean": "echo '🔧 Force cleaning all related processes...' && pkill -9 -f 'python3 -m http.server' 2>/dev/null; pkill -9 -f 'node.*dev' 2>/dev/null; pkill -9 -f 'npm.*dev' 2>/dev/null; sleep 3; echo '✅ Cleanup complete'",
+    "reset": "echo '🔄 Full system reset...' && npm run force-clean && sleep 2 && npm run build && echo '✅ System reset complete. Run \"npm run start-server\" to start fresh.'",
+    "server": "./dev-server.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -21,5 +34,8 @@
   "homepage": "https://github.com/jaxry/wave-function-collapse#readme",
   "devDependencies": {
     "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@types/three": "^0.152.0"
   }
 }

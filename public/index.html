@@ -4,8 +4,156 @@
   <meta charset="utf-8">
   <title>WaveFunctionCollapse</title>
   <link href="style.css" rel="stylesheet" type="text/css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/systemjs/0.20.19/system.js"></script>
-  <script src="dist.js"></script>
+  <!-- Three.js CDN with fallback -->
+  <script>
+    // Fallback system for Three.js loading
+    window.threeJSLoaded = false;
+    window.threeJSLoadAttempts = 0;
+    window.maxThreeJSLoadAttempts = 3;
+
+    function loadThreeJS() {
+      window.threeJSLoadAttempts++;
+
+      // Clear any existing script
+      const existingScript = document.querySelector('script[src*="three.min.js"]');
+      if (existingScript) {
+        existingScript.remove();
+      }
+
+      const script = document.createElement('script');
+
+      // Try different CDN sources
+      const cdnUrls = [
+        'https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js',
+        'https://cdn.jsdelivr.net/npm/three@0.152.0/build/three.min.js',
+        'https://unpkg.com/three@0.152.0/build/three.min.js'
+      ];
+
+      script.src = cdnUrls[(window.threeJSLoadAttempts - 1) % cdnUrls.length];
+
+      script.onload = function() {
+        if (typeof window.THREE !== 'undefined') {
+          window.threeJSLoaded = true;
+          console.log('✅ Three.js loaded successfully from:', script.src);
+          console.log('Three.js version:', window.THREE.REVISION);
+
+          // Configure SystemJS
+          if (typeof SystemJS !== 'undefined') {
+            SystemJS.set('three', SystemJS.newModule(window.THREE));
+          }
+
+          console.log('🚀 Starting main application load sequence...');
+          // Load the main application
+          loadMainApplication();
+        } else {
+          console.error('❌ Three.js loaded but THREE object not found');
+          tryNextCDN();
+        }
+      };
+
+      script.onerror = function() {
+        console.error('❌ Failed to load Three.js from:', script.src);
+        tryNextCDN();
+      };
+
+      document.head.appendChild(script);
+    }
+
+    function tryNextCDN() {
+      if (window.threeJSLoadAttempts < window.maxThreeJSLoadAttempts) {
+        console.log(`🔄 Trying next CDN (attempt ${window.threeJSLoadAttempts + 1}/${window.maxThreeJSLoadAttempts})`);
+        setTimeout(loadThreeJS, 1000);
+      } else {
+        console.error('❌ All Three.js CDN attempts failed');
+        showFallbackMessage();
+      }
+    }
+
+    function loadMainApplication() {
+      // First load SystemJS
+      if (typeof SystemJS === 'undefined') {
+        const systemJSScript = document.createElement('script');
+        systemJSScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/systemjs/0.20.19/system.js';
+        systemJSScript.onload = function() {
+          console.log('✅ SystemJS loaded');
+          console.log('🔧 Configuring SystemJS for Three.js...');
+          SystemJS.set('three', SystemJS.newModule(window.THREE));
+          console.log('✅ SystemJS configured for Three.js');
+
+          // Now load our compiled TypeScript
+          loadDistJS();
+        };
+        systemJSScript.onerror = function() {
+          console.error('❌ Failed to load SystemJS');
+        };
+        document.head.appendChild(systemJSScript);
+      } else {
+        SystemJS.set('three', SystemJS.newModule(window.THREE));
+        loadDistJS();
+      }
+    }
+
+    function loadDistJS() {
+      console.log('📦 Loading dist.js...');
+
+      // Use a timeout to ensure SystemJS is fully initialized
+      setTimeout(function() {
+        // Load dist.js (contains our compiled TypeScript)
+        const distScript = document.createElement('script');
+        distScript.src = 'dist.js';
+        distScript.onload = function() {
+          console.log('✅ Application (dist.js) loaded successfully');
+          console.log('🎯 Starting main module import...');
+
+          // Give SystemJS a moment to process the loaded modules
+          setTimeout(function() {
+            if (typeof SystemJS !== 'undefined') {
+              console.log('✅ SystemJS is available, importing main module...');
+
+              // Try to import the main module
+              SystemJS.import("main").then(function(module) {
+                console.log('✅ Main module loaded successfully!');
+                console.log('🎮 Application should now be running...');
+              }).catch(function(err) {
+                console.error('❌ Failed to load main module:', err);
+                if (err.message) console.error('Error message:', err.message);
+                if (err.stack) console.error('Stack trace:', err.stack);
+              });
+            } else {
+              console.error('❌ SystemJS is not available after loading dist.js');
+            }
+          }, 100); // Small delay to ensure SystemJS processes the modules
+        };
+        distScript.onerror = function() {
+          console.error('❌ Failed to load dist.js from server');
+        };
+
+        console.log('🔗 Adding dist.js to document...');
+        document.head.appendChild(distScript);
+      }, 200); // Delay to ensure SystemJS is fully ready
+    }
+
+    function showFallbackMessage() {
+      document.body.innerHTML = `
+        <div style="text-align: center; padding: 50px; font-family: Arial, sans-serif;">
+          <h1>⚠️ Three.js Loading Failed</h1>
+          <p>Unable to load Three.js from CDN sources.</p>
+          <p>Please check your internet connection and try:</p>
+          <ul style="text-align: left; display: inline-block;">
+            <li>Refresh the page (F5)</li>
+            <li>Clear browser cache</li>
+            <li>Disable ad blockers temporarily</li>
+            <li>Try a different browser</li>
+          </ul>
+          <p><small>If the problem persists, the 2D version should still work.</small></p>
+          <p><button onclick="window.location.reload()">🔄 Retry Loading</button></p>
+        </div>
+      `;
+    }
+
+    // Start loading Three.js
+    loadThreeJS();
+  </script>
 </head>
 
 <body>
@@ -21,8 +169,5 @@
   <footer>
     <p>By Lucas Crane (<a href="https://github.com/jaxry">Github</a>, <a href="https://github.com/jaxry/wave-function-collapse">Source</a>)</p>
   </footer>
-  <script>
-    SystemJS.import("main");
-  </script>
 </body>
 </html>

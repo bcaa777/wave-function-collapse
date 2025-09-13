@@ -114,6 +114,138 @@ main > * {
   margin: 10px 0;
 }
 
+/* Color reference styles */
+.colorReferenceComponent {
+  background: #f8f8f8;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  padding: 15px;
+  max-width: 350px;
+}
+
+.colorGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.colorItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #eee;
+}
+
+.colorSwatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid #ccc;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.colorSwatch:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.colorInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.colorHex {
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: bold;
+  color: #666;
+  margin-bottom: 2px;
+}
+
+.colorDesc {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.colorProps {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.prop {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.prop.walkable {
+  background: #4CAF50;
+  color: white;
+}
+
+.prop.blocked {
+  background: #f44336;
+  color: white;
+}
+
+.prop.dangerous {
+  background: #FF5722;
+  color: white;
+}
+
+.prop.collectible {
+  background: #FFC107;
+  color: black;
+}
+
+.prop.interactive {
+  background: #2196F3;
+  color: white;
+}
+
+/* Editor layout styles */
+.editorMainContainer {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.editorLeftColumn {
+  flex: 1;
+  min-width: 400px;
+}
+
+.editorRightColumn {
+  flex-shrink: 0;
+  width: 350px;
+}
+
+/* Responsive design for color reference */
+@media (max-width: 900px) {
+  .editorMainContainer {
+    flex-direction: column;
+  }
+
+  .editorRightColumn {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .colorReferenceComponent {
+    max-width: 100%;
+  }
+}
+
 /* Dungeon crawler styles */
 .dungeonCrawlerComponent {
   margin: 10px 0;

@@ -2,6 +2,7 @@ import { buildDomTree } from "../util";
 import { IComponent } from "./component";
 import { inputGroup } from "./common";
 import { DrawingTool } from "./drawingCanvas";
+import { createColorReference } from "./colorReference";
 
 export interface IComponentImageEditor extends IComponent {
   onEditComplete?: (image: ImageData) => void;
@@ -122,6 +123,13 @@ export function createImageEditor(): IComponentImageEditor {
     if (imageData && component.onEditComplete) {
       component.onEditComplete(imageData);
     }
+  };
+
+  // Color reference component
+  const colorReference = createColorReference();
+  colorReference.onColorSelect = (selectedColor: string) => {
+    currentColor = selectedColor;
+    colorInput.value = selectedColor;
   };
 
   // Helper functions
@@ -338,8 +346,21 @@ export function createImageEditor(): IComponentImageEditor {
   canvas.addEventListener('mouseup', stopDrawing);
   canvas.addEventListener('mouseout', stopDrawing);
 
-  // Build DOM
-  buildDomTree(component.domElement, [
+  // Create main container for two-column layout
+  const mainContainer = document.createElement("div");
+  mainContainer.className = "editorMainContainer";
+
+  // Left column - Editor tools and canvas
+  const leftColumn = document.createElement("div");
+  leftColumn.className = "editorLeftColumn";
+
+  // Right column - Color reference
+  const rightColumn = document.createElement("div");
+  rightColumn.className = "editorRightColumn";
+  rightColumn.appendChild(colorReference.domElement);
+
+  // Build left column content
+  buildDomTree(leftColumn, [
     document.createElement("p"), [
       "Edit the generated image. Add player start/end points and polish the dungeon layout."
     ],
@@ -355,6 +376,11 @@ export function createImageEditor(): IComponentImageEditor {
     ],
     canvas,
   ]);
+
+  mainContainer.appendChild(leftColumn);
+  mainContainer.appendChild(rightColumn);
+
+  component.domElement.appendChild(mainContainer);
 
   return component;
 }

@@ -1,9 +1,10 @@
 import { buildDomTree } from "../util";
 import { IComponent } from "./component";
 import { GameElement, getElementProperties } from "../colorMapping";
+import { SpriteManager } from "./spriteManager";
 
 export interface IComponentDungeonCrawler extends IComponent {
-  startGame(gameMap: GameElement[][], playerStart: { x: number; y: number }): void;
+  startGame(gameMap: GameElement[][], playerStart: { x: number; y: number }): Promise<void>;
   stopGame(): void;
   onGameComplete?: () => void;
   onGameOver?: () => void;
@@ -31,19 +32,27 @@ export function createDungeonCrawler(): IComponentDungeonCrawler {
 
   const component: IComponentDungeonCrawler = {
     domElement: Object.assign(document.createElement("div"), { className: "dungeonCrawlerComponent" }),
-    startGame: (gameMap: GameElement[][], playerStart: { x: number; y: number }) => {
-      currentGameMap = gameMap;
-      player.x = playerStart.x + 0.5;
-      player.y = playerStart.y + 0.5;
-      player.angle = 0;
-      player.health = player.maxHealth;
-      player.keys = 0;
-      player.treasures = 0;
-      enemies = [];
-      gameRunning = true;
-      lastFrameTime = Date.now();
-      gameLoop();
-    },
+  startGame: async (gameMap: GameElement[][], playerStart: { x: number; y: number }) => {
+    currentGameMap = gameMap;
+    player.x = playerStart.x + 0.5;
+    player.y = playerStart.y + 0.5;
+    player.angle = 0;
+    player.health = player.maxHealth;
+    player.keys = 0;
+    player.treasures = 0;
+    enemies = [];
+    gameRunning = true;
+    lastFrameTime = Date.now();
+
+    // Initialize sprites and textures
+    try {
+      await spriteManager.initializeDefaults();
+    } catch (error) {
+      console.warn('Failed to load some sprites/textures:', error);
+    }
+
+    gameLoop();
+  },
     stopGame: () => {
       gameRunning = false;
       if (animationFrameId) {
@@ -71,6 +80,9 @@ export function createDungeonCrawler(): IComponentDungeonCrawler {
 
   // Enemy state
   let enemies: Enemy[] = [];
+
+  // Sprite and texture management
+  const spriteManager = new SpriteManager();
 
   // Game constants
   const CANVAS_WIDTH = 800;
@@ -270,13 +282,12 @@ export function createDungeonCrawler(): IComponentDungeonCrawler {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Draw ceiling (darker)
-    ctx.fillStyle = "#2a2a2a";
+    // Draw ceiling (stone-like texture color)
+    ctx.fillStyle = "#3a3a3a"; // Darker stone color for ceiling
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
 
-    // Draw floor (lighter)
-    ctx.fillStyle = "#4a4a4a";
-    ctx.fillRect(0, CANVAS_HEIGHT / 2, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+    // Draw floor with dynamic colors based on nearby elements
+    drawDynamicFloor();
 
     // Raycasting
     const numRays = CANVAS_WIDTH;
@@ -295,12 +306,288 @@ export function createDungeonCrawler(): IComponentDungeonCrawler {
       const element = getWallElement(rayAngle, distance);
       const color = getWallColor(element, distance);
 
+      // Debug: log wall colors occasionally (remove this in production)
+      if (Math.random() < 0.005) {
+        console.log('Wall element:', element, 'Color:', color, 'Distance:', distance.toFixed(2));
+      }
+
       ctx.fillStyle = color;
       ctx.fillRect(i, wallTop, 1, wallBottom - wallTop);
     }
 
+    // Draw sprites for interactive elements
+    renderSprites();
+
     // Draw UI
     updateUI();
+  }
+
+  function drawDynamicFloor(): void {
+    const floorY = CANVAS_HEIGHT / 2;
+    const floorHeight = CANVAS_HEIGHT / 2;
+
+    // Draw floor with proper perspective (doesn't rotate with player)
+    ctx.fillStyle = "#4a4a4a"; // Base floor color
+    ctx.fillRect(0, floorY, CANVAS_WIDTH, floorHeight);
+
+    // Draw floor tiles with perspective
+    drawFloorTiles();
+  }
+
+  function drawFloorTiles(): void {
+    const floorY = CANVAS_HEIGHT / 2;
+    const tileSize = 60;
+    const numRows = 6;
+
+    // Draw floor tiles with proper perspective
+    for (let row = 0; row < numRows; row++) {
+      const rowY = floorY + (row * tileSize * 0.4);
+      const rowHeight = tileSize * 0.4;
+      const rowWidth = CANVAS_WIDTH * (1 - row * 0.08);
+      const rowX = (CANVAS_WIDTH - rowWidth) / 2;
+
+      if (rowY > CANVAS_HEIGHT) break;
+
+      // Alternate tile colors for checkerboard pattern
+      const numCols = Math.floor(rowWidth / (tileSize * (1 - row * 0.03))) + 1;
+
+      for (let col = 0; col < numCols; col++) {
+        const colX = rowX + (col * rowWidth / numCols);
+        const colWidth = rowWidth / numCols;
+
+        // Create checkerboard pattern
+        const isDarkTile = (row + col) % 2 === 0;
+
+        // Draw tile with gradient for depth
+        const gradient = ctx.createLinearGradient(colX, rowY, colX, rowY + rowHeight);
+        if (isDarkTile) {
+          gradient.addColorStop(0, `rgba(70, 70, 70, ${0.9 - row * 0.1})`);
+          gradient.addColorStop(1, `rgba(50, 50, 50, ${0.8 - row * 0.1})`);
+        } else {
+          gradient.addColorStop(0, `rgba(80, 80, 80, ${0.9 - row * 0.1})`);
+          gradient.addColorStop(1, `rgba(60, 60, 60, ${0.8 - row * 0.1})`);
+        }
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(colX, rowY, colWidth, rowHeight);
+
+        // Add subtle tile border
+        ctx.strokeStyle = `rgba(120, 120, 120, ${0.3 - row * 0.03})`;
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(colX, rowY, colWidth, rowHeight);
+      }
+    }
+  }
+
+  function renderSprites(): void {
+    // Collect all sprites with their positions and distances
+    const visibleSprites: Array<{
+      sprite: any;
+      worldX: number;
+      worldY: number;
+      distance: number;
+      angle: number;
+    }> = [];
+
+    // Check all map elements for sprites
+    for (let y = 0; y < currentGameMap.length; y++) {
+      for (let x = 0; x < currentGameMap[y].length; x++) {
+        const element = currentGameMap[y][x];
+        const properties = getElementProperties(element);
+
+        // Only process sprites for interactive elements
+        if (properties.interactive || element === GameElement.ENEMY) {
+          let spriteName: string;
+          switch (element) {
+            case GameElement.ENEMY:
+              spriteName = 'enemy';
+              break;
+            case GameElement.DANGER:
+              spriteName = 'danger';
+              break;
+            case GameElement.PLAYER_FINISH:
+              spriteName = 'finish';
+              break;
+            case GameElement.TREASURE:
+              spriteName = 'treasure';
+              break;
+            case GameElement.KEY:
+              spriteName = 'key';
+              break;
+            case GameElement.DOOR:
+              spriteName = 'door';
+              break;
+            case GameElement.STAIRS:
+              spriteName = 'stairs';
+              break;
+            default:
+              continue; // Skip elements without sprites
+          }
+
+          const sprite = spriteManager.getSprite(spriteName);
+          if (sprite) {
+            const spriteX = x + 0.5;
+            const spriteY = y + 0.5;
+
+            // Calculate distance and angle to sprite
+            const dx = spriteX - player.x;
+            const dy = spriteY - player.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < 0.1) continue; // Too close to player
+
+            const angle = Math.atan2(dy, dx);
+            let relativeAngle = angle - player.angle;
+
+            // Normalize angle to [-PI, PI]
+            while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+            while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+
+            // Check if sprite is in field of view
+            if (Math.abs(relativeAngle) > FOV / 2) continue;
+
+            // Check if sprite is not behind a wall (robust occlusion test)
+            if (!isSpriteVisible(spriteX, spriteY, distance)) continue;
+
+            // Additional check: ensure sprite is actually in front of walls by comparing to raycast distance
+            const spriteRayDistance = castRay(angle);
+            if (spriteRayDistance < distance - 0.1) continue; // Wall is definitely closer
+
+            visibleSprites.push({
+              sprite,
+              worldX: spriteX,
+              worldY: spriteY,
+              distance,
+              angle: relativeAngle
+            });
+          }
+        }
+      }
+    }
+
+    // Add enemy sprites
+    enemies.forEach((enemy) => {
+      const sprite = spriteManager.getSprite('enemy');
+      if (sprite) {
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 0.1) return; // Too close
+
+        const angle = Math.atan2(dy, dx);
+        let relativeAngle = angle - player.angle;
+
+        while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+        while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+
+        if (Math.abs(relativeAngle) > FOV / 2) return;
+
+        // Check occlusion for enemies too
+        if (!isSpriteVisible(enemy.x, enemy.y, distance)) return;
+
+        // Additional check: ensure enemy is actually in front of walls
+        const enemyRayDistance = castRay(angle);
+        if (enemyRayDistance < distance - 0.1) return; // Wall is definitely closer
+
+        visibleSprites.push({
+          sprite,
+          worldX: enemy.x,
+          worldY: enemy.y,
+          distance,
+          angle: relativeAngle
+        });
+      }
+    });
+
+    // Sort sprites by distance (far to near) for proper rendering order
+    visibleSprites.sort((a, b) => b.distance - a.distance);
+
+    // Render all visible sprites
+    visibleSprites.forEach((spriteData) => {
+      spriteManager.drawSprite(
+        ctx,
+        spriteData.sprite,
+        spriteData.worldX,
+        spriteData.worldY,
+        player.x,
+        player.y,
+        player.angle,
+        CANVAS_WIDTH,
+        CANVAS_HEIGHT,
+        FOV
+      );
+    });
+  }
+
+  // Check if a sprite is visible (not occluded by walls)
+  function isSpriteVisible(spriteX: number, spriteY: number, spriteDistance: number): boolean {
+    // Method 1: Use existing raycasting data for more accurate occlusion
+    const dx = spriteX - player.x;
+    const dy = spriteY - player.y;
+    const angle = Math.atan2(dy, dx);
+
+    // Normalize angle to match raycasting system
+    let relativeAngle = angle - player.angle;
+    while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+    while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+
+    // Convert angle to screen space (like the raycasting system)
+    const screenX = Math.floor(CANVAS_WIDTH / 2 + (relativeAngle / (FOV / 2)) * (CANVAS_WIDTH / 2));
+
+    // If sprite is outside screen bounds, it's not visible
+    if (screenX < 0 || screenX >= CANVAS_WIDTH) {
+      return false;
+    }
+
+    // Method 2: Cast a ray in the direction of the sprite and check wall distance
+    const rayDistance = castRay(angle);
+
+    // If the wall is closer than the sprite, the sprite is occluded
+    if (rayDistance < spriteDistance - 0.3) { // 0.3 tolerance for sprite size
+      return false;
+    }
+
+    // Method 3: Check immediate surroundings for wall occlusion
+    const checkRadius = 1; // Check 1 tile radius around sprite
+    for (let offsetY = -checkRadius; offsetY <= checkRadius; offsetY++) {
+      for (let offsetX = -checkRadius; offsetX <= checkRadius; offsetX++) {
+        const checkTileX = Math.floor(spriteX) + offsetX;
+        const checkTileY = Math.floor(spriteY) + offsetY;
+
+        if (checkTileX < 0 || checkTileX >= currentGameMap[0].length ||
+            checkTileY < 0 || checkTileY >= currentGameMap.length) {
+          continue;
+        }
+
+        const element = currentGameMap[checkTileY][checkTileX];
+        const properties = getElementProperties(element);
+
+        // If there's a wall near the sprite in the direction from the player
+        if (!properties.walkable) {
+          const wallDistance = Math.sqrt(
+            Math.pow(checkTileX + 0.5 - player.x, 2) +
+            Math.pow(checkTileY + 0.5 - player.y, 2)
+          );
+
+          // If wall is between player and sprite, check if it blocks the view
+          if (wallDistance < spriteDistance) {
+            // Simple angle check to see if wall is in the line of sight
+            const wallAngle = Math.atan2(checkTileY + 0.5 - player.y, checkTileX + 0.5 - player.x);
+            let wallRelativeAngle = wallAngle - player.angle;
+            while (wallRelativeAngle < -Math.PI) wallRelativeAngle += 2 * Math.PI;
+            while (wallRelativeAngle > Math.PI) wallRelativeAngle -= 2 * Math.PI;
+
+            // If wall is within a narrow cone towards the sprite, it might occlude
+            if (Math.abs(wallRelativeAngle - relativeAngle) < 0.3) { // ~17 degrees
+              return false;
+            }
+          }
+        }
+      }
+    }
+
+    return true;
   }
 
   function castRay(angle: number): number {
@@ -351,21 +638,29 @@ export function createDungeonCrawler(): IComponentDungeonCrawler {
   }
 
   function getWallColor(element: GameElement, distance: number): string {
-    // Distance fog
-    const fogFactor = Math.max(0, 1 - distance / 10);
-    const brightness = Math.floor(255 * fogFactor);
+    // Use sprite manager for wall colors with fallback
+    try {
+      const color = spriteManager.getWallTextureColor(element.toLowerCase(), distance);
+      // Ensure we return a valid color
+      if (color && color.startsWith('#') || color.startsWith('rgb')) {
+        return color;
+      }
+    } catch (error) {
+      console.warn('Error getting wall texture color:', error);
+    }
 
+    // Fallback colors based on element type
     switch (element) {
       case GameElement.WALL:
-        return `rgb(${brightness}, ${brightness}, ${brightness})`;
+        return `rgb(${Math.floor(120 - distance * 10)}, ${Math.floor(120 - distance * 10)}, ${Math.floor(130 - distance * 10)})`;
       case GameElement.DOOR:
-        return `rgb(${brightness}, ${brightness * 0.5}, 0)`;
+        return `rgb(${Math.floor(100 - distance * 8)}, ${Math.floor(60 - distance * 5)}, ${Math.floor(30 - distance * 3)})`;
       case GameElement.DANGER:
-        return `rgb(${brightness}, ${brightness * 0.3}, ${brightness * 0.3})`;
+        return `rgb(${Math.floor(180 - distance * 15)}, ${Math.floor(40 - distance * 3)}, ${Math.floor(20 - distance * 2)})`;
       case GameElement.FIRE:
-        return `rgb(${brightness}, ${brightness * 0.5}, 0)`;
+        return `rgb(${Math.floor(200 - distance * 15)}, ${Math.floor(80 - distance * 6)}, ${Math.floor(10 - distance * 1)})`;
       default:
-        return `rgb(${brightness}, ${brightness}, ${brightness})`;
+        return `rgb(${Math.floor(150 - distance * 12)}, ${Math.floor(150 - distance * 12)}, ${Math.floor(160 - distance * 12)})`;
     }
   }
 

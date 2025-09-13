@@ -5,7 +5,7 @@ import { createWfcOptions } from "./components/wfcOptions";
 import { createPresetPicker } from "./components/presetPicker";
 import { createDrawingCanvas } from "./components/drawingCanvas";
 import { createImageEditor } from "./components/imageEditor";
-import { createDungeonCrawler } from "./components/dungeonCrawler";
+import { createThreeJSDungeonCrawler } from "./components/threeJSDungeonCrawler";
 import { imageDataToGameMap, findPlayerStart, findPlayerFinish, GameElement } from "./colorMapping";
 
 let wfc: IWaveFunctionCollapse | undefined;
@@ -124,8 +124,8 @@ imageEditor.onEditComplete = (image) => {
   startDungeonCrawler();
 };
 
-// Dungeon crawler
-const dungeonCrawler = createDungeonCrawler();
+// Three.js Dungeon crawler
+const dungeonCrawler = createThreeJSDungeonCrawler();
 dungeonCrawler.onGameComplete = () => {
   alert("Congratulations! You completed the dungeon!");
   switchMode(AppMode.INPUT);
@@ -259,7 +259,7 @@ function buildDungeonCrawlerMode() {
   ]);
 }
 
-function startDungeonCrawler() {
+async function startDungeonCrawler() {
   if (!generatedImageData) return;
 
   // Convert image to game map
@@ -282,7 +282,11 @@ function startDungeonCrawler() {
   }
 
   // Start the game
-  dungeonCrawler.startGame(gameMap, playerStart);
+  try {
+    await dungeonCrawler.startGame(gameMap, playerStart);
+  } catch (error: any) {
+    console.error('Failed to start game:', error);
+  }
 }
 
 // Mode tab event listeners

@@ -1328,10 +1328,380 @@ System.register("components/drawingCanvas", ["util", "components/common"], funct
         }
     };
 });
-System.register("components/imageEditor", ["util", "components/common"], function (exports_17, context_17) {
+System.register("colorMapping", [], function (exports_17, context_17) {
     "use strict";
-    var util_5, common_4;
+    var GameElement, DEFAULT_COLOR_MAPPINGS;
     var __moduleName = context_17 && context_17.id;
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : null;
+    }
+    exports_17("hexToRgb", hexToRgb);
+    function rgbToHex(r, g, b) {
+        return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+    exports_17("rgbToHex", rgbToHex);
+    function colorDistance(color1, color2) {
+        return Math.sqrt(Math.pow(color1.r - color2.r, 2) +
+            Math.pow(color1.g - color2.g, 2) +
+            Math.pow(color1.b - color2.b, 2));
+    }
+    exports_17("colorDistance", colorDistance);
+    // Find the closest matching color from the mapping
+    function findClosestColor(r, g, b, mappings) {
+        const targetColor = { r, g, b };
+        let closestElement = GameElement.FLOOR; // Default
+        let minDistance = Infinity;
+        for (const [hexColor, element] of Object.entries(mappings)) {
+            const rgbColor = hexToRgb(hexColor);
+            if (rgbColor) {
+                const distance = colorDistance(targetColor, rgbColor);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestElement = element;
+                }
+            }
+        }
+        return closestElement;
+    }
+    exports_17("findClosestColor", findClosestColor);
+    // Convert image data to game map
+    function imageDataToGameMap(imageData, mappings = DEFAULT_COLOR_MAPPINGS) {
+        const { data, width, height } = imageData;
+        const gameMap = [];
+        for (let y = 0; y < height; y++) {
+            const row = [];
+            for (let x = 0; x < width; x++) {
+                const index = (y * width + x) * 4;
+                const r = data[index];
+                const g = data[index + 1];
+                const b = data[index + 2];
+                const element = findClosestColor(r, g, b, mappings);
+                row.push(element);
+            }
+            gameMap.push(row);
+        }
+        return gameMap;
+    }
+    exports_17("imageDataToGameMap", imageDataToGameMap);
+    // Find player start position
+    function findPlayerStart(gameMap) {
+        for (let y = 0; y < gameMap.length; y++) {
+            for (let x = 0; x < gameMap[y].length; x++) {
+                if (gameMap[y][x] === GameElement.PLAYER_START) {
+                    return { x, y };
+                }
+            }
+        }
+        return null;
+    }
+    exports_17("findPlayerStart", findPlayerStart);
+    // Find player finish position
+    function findPlayerFinish(gameMap) {
+        for (let y = 0; y < gameMap.length; y++) {
+            for (let x = 0; x < gameMap[y].length; x++) {
+                if (gameMap[y][x] === GameElement.PLAYER_FINISH) {
+                    return { x, y };
+                }
+            }
+        }
+        return null;
+    }
+    exports_17("findPlayerFinish", findPlayerFinish);
+    // Get all enemy positions
+    function findEnemies(gameMap) {
+        const enemies = [];
+        for (let y = 0; y < gameMap.length; y++) {
+            for (let x = 0; x < gameMap[y].length; x++) {
+                if (gameMap[y][x] === GameElement.ENEMY) {
+                    enemies.push({ x, y });
+                }
+            }
+        }
+        return enemies;
+    }
+    exports_17("findEnemies", findEnemies);
+    // Check if a position is walkable (not a wall)
+    function isWalkable(gameMap, x, y) {
+        if (y < 0 || y >= gameMap.length || x < 0 || x >= gameMap[y].length) {
+            return false;
+        }
+        const element = gameMap[y][x];
+        return element !== GameElement.WALL && element !== GameElement.DOOR;
+    }
+    exports_17("isWalkable", isWalkable);
+    function getElementProperties(element) {
+        switch (element) {
+            case GameElement.WALL:
+                return {
+                    walkable: false,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "A solid wall blocking your path."
+                };
+            case GameElement.DANGER:
+                return {
+                    walkable: true,
+                    dangerous: true,
+                    collectible: false,
+                    interactive: false,
+                    description: "Dangerous terrain that damages you when stepped on."
+                };
+            case GameElement.WATER:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Water that slows your movement."
+                };
+            case GameElement.ENEMY:
+                return {
+                    walkable: true,
+                    dangerous: true,
+                    collectible: false,
+                    interactive: true,
+                    description: "An enemy that will attack you on sight."
+                };
+            case GameElement.GRASS:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Soft grass that cushions your steps."
+                };
+            case GameElement.FIRE:
+                return {
+                    walkable: true,
+                    dangerous: true,
+                    collectible: false,
+                    interactive: false,
+                    description: "Burning fire that damages you when stepped on."
+                };
+            case GameElement.PLAYER_START:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Your starting position in the dungeon."
+                };
+            case GameElement.PLAYER_FINISH:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: true,
+                    description: "The exit from the dungeon."
+                };
+            case GameElement.TREASURE:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: true,
+                    interactive: false,
+                    description: "Valuable treasure waiting to be collected."
+                };
+            case GameElement.KEY:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: true,
+                    interactive: false,
+                    description: "A key that can open locked doors."
+                };
+            case GameElement.DOOR:
+                return {
+                    walkable: false,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: true,
+                    description: "A locked door that requires a key to open."
+                };
+            case GameElement.STAIRS:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: true,
+                    description: "Stairs leading to another level."
+                };
+            case GameElement.FLOOR:
+            default:
+                return {
+                    walkable: true,
+                    dangerous: false,
+                    collectible: false,
+                    interactive: false,
+                    description: "Regular dungeon floor."
+                };
+        }
+    }
+    exports_17("getElementProperties", getElementProperties);
+    return {
+        setters: [],
+        execute: function () {
+            // Color mapping system for converting image colors to game elements
+            (function (GameElement) {
+                GameElement["WALL"] = "wall";
+                GameElement["DANGER"] = "danger";
+                GameElement["WATER"] = "water";
+                GameElement["ENEMY"] = "enemy";
+                GameElement["GRASS"] = "grass";
+                GameElement["FIRE"] = "fire";
+                GameElement["PLAYER_START"] = "player_start";
+                GameElement["PLAYER_FINISH"] = "player_finish";
+                GameElement["FLOOR"] = "floor";
+                GameElement["TREASURE"] = "treasure";
+                GameElement["KEY"] = "key";
+                GameElement["DOOR"] = "door";
+                GameElement["STAIRS"] = "stairs";
+            })(GameElement || (exports_17("GameElement", GameElement = {})));
+            // Default color mappings based on user requirements
+            exports_17("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
+                '#000000': GameElement.WALL, // Black - wall
+                '#FF0000': GameElement.DANGER, // Red - danger
+                '#0000FF': GameElement.WATER, // Blue - water
+                '#800080': GameElement.ENEMY, // Purple - enemy
+                '#008000': GameElement.GRASS, // Green - grass
+                '#FFA500': GameElement.FIRE, // Orange - fire
+                '#006400': GameElement.PLAYER_START, // Dark green - player start
+                '#8B0000': GameElement.PLAYER_FINISH, // Dark red - player finish
+                // Additional mappings for more variety
+                '#FFFF00': GameElement.TREASURE, // Yellow - treasure
+                '#FFD700': GameElement.KEY, // Gold - key
+                '#8B4513': GameElement.DOOR, // Brown - door
+                '#C0C0C0': GameElement.STAIRS, // Silver - stairs
+                '#FFFFFF': GameElement.FLOOR, // White - floor (default)
+            });
+        }
+    };
+});
+System.register("components/colorReference", ["colorMapping"], function (exports_18, context_18) {
+    "use strict";
+    var colorMapping_1;
+    var __moduleName = context_18 && context_18.id;
+    function createColorReference() {
+        const component = {
+            domElement: Object.assign(document.createElement("div"), { className: "colorReferenceComponent" }),
+            updateMappings: (mappings = colorMapping_1.DEFAULT_COLOR_MAPPINGS) => {
+                updateColorGrid(mappings);
+            }
+        };
+        // Color mapping descriptions
+        const colorDescriptions = {
+            '#000000': 'Wall (impassable)',
+            '#FF0000': 'Danger (damage over time)',
+            '#0000FF': 'Water (slows movement)',
+            '#800080': 'Enemy (attacks on contact)',
+            '#008000': 'Grass (safe terrain)',
+            '#FFA500': 'Fire (dangerous)',
+            '#006400': 'Player Start',
+            '#8B0000': 'Player Finish/Exit',
+            '#FFFF00': 'Treasure (collectible)',
+            '#FFD700': 'Key (unlocks doors)',
+            '#8B4513': 'Door (locked, needs key)',
+            '#C0C0C0': 'Stairs (interactive)',
+            '#FFFFFF': 'Floor (default)'
+        };
+        function updateColorGrid(mappings) {
+            // Clear existing content
+            component.domElement.innerHTML = '';
+            const colorGrid = document.createElement("div");
+            colorGrid.className = "colorGrid";
+            const title = document.createElement("h4");
+            title.textContent = "Color Reference Guide";
+            title.style.marginBottom = "10px";
+            colorGrid.appendChild(title);
+            // Sort colors by their hex value for consistent display
+            const sortedColors = Object.entries(mappings).sort(([a], [b]) => a.localeCompare(b));
+            sortedColors.forEach(([hexColor, gameElement]) => {
+                const colorItem = document.createElement("div");
+                colorItem.className = "colorItem";
+                const colorSwatch = document.createElement("div");
+                colorSwatch.className = "colorSwatch";
+                colorSwatch.style.backgroundColor = hexColor;
+                colorSwatch.style.cursor = "pointer";
+                // Add border for white color to make it visible
+                if (hexColor === '#FFFFFF') {
+                    colorSwatch.style.border = "1px solid #ccc";
+                }
+                // Make swatch clickable
+                colorSwatch.onclick = () => {
+                    if (component.onColorSelect) {
+                        component.onColorSelect(hexColor);
+                    }
+                };
+                // Add hover effect
+                colorSwatch.onmouseenter = () => {
+                    colorSwatch.style.transform = "scale(1.1)";
+                    colorSwatch.style.boxShadow = "0 2px 8px rgba(0,0,0,0.2)";
+                };
+                colorSwatch.onmouseleave = () => {
+                    colorSwatch.style.transform = "scale(1)";
+                    colorSwatch.style.boxShadow = "none";
+                };
+                const colorInfo = document.createElement("div");
+                colorInfo.className = "colorInfo";
+                const colorHex = document.createElement("div");
+                colorHex.className = "colorHex";
+                colorHex.textContent = hexColor.toUpperCase();
+                const colorDesc = document.createElement("div");
+                colorDesc.className = "colorDesc";
+                colorDesc.textContent = colorDescriptions[hexColor] || `${gameElement.replace('_', ' ')}`;
+                const elementProps = colorMapping_1.getElementProperties(gameElement);
+                const colorProps = document.createElement("div");
+                colorProps.className = "colorProps";
+                // Add property indicators
+                if (elementProps.walkable) {
+                    colorProps.innerHTML += '<span class="prop walkable">Walkable</span>';
+                }
+                else {
+                    colorProps.innerHTML += '<span class="prop blocked">Blocked</span>';
+                }
+                if (elementProps.dangerous) {
+                    colorProps.innerHTML += '<span class="prop dangerous">Danger</span>';
+                }
+                if (elementProps.collectible) {
+                    colorProps.innerHTML += '<span class="prop collectible">Collectible</span>';
+                }
+                if (elementProps.interactive) {
+                    colorProps.innerHTML += '<span class="prop interactive">Interactive</span>';
+                }
+                colorInfo.appendChild(colorHex);
+                colorInfo.appendChild(colorDesc);
+                colorInfo.appendChild(colorProps);
+                colorItem.appendChild(colorSwatch);
+                colorItem.appendChild(colorInfo);
+                colorGrid.appendChild(colorItem);
+            });
+            component.domElement.appendChild(colorGrid);
+        }
+        // Initialize with default mappings
+        component.updateMappings();
+        return component;
+    }
+    exports_18("createColorReference", createColorReference);
+    return {
+        setters: [
+            function (colorMapping_1_1) {
+                colorMapping_1 = colorMapping_1_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+System.register("components/imageEditor", ["util", "components/common", "components/colorReference"], function (exports_19, context_19) {
+    "use strict";
+    var util_5, common_4, colorReference_1;
+    var __moduleName = context_19 && context_19.id;
     function createImageEditor() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "imageEditorComponent" }),
@@ -1432,6 +1802,12 @@ System.register("components/imageEditor", ["util", "components/common"], functio
             if (imageData && component.onEditComplete) {
                 component.onEditComplete(imageData);
             }
+        };
+        // Color reference component
+        const colorReference = colorReference_1.createColorReference();
+        colorReference.onColorSelect = (selectedColor) => {
+            currentColor = selectedColor;
+            colorInput.value = selectedColor;
         };
         // Helper functions
         function updateCanvasDisplay() {
@@ -1618,8 +1994,18 @@ System.register("components/imageEditor", ["util", "components/common"], functio
         canvas.addEventListener('mousemove', draw);
         canvas.addEventListener('mouseup', stopDrawing);
         canvas.addEventListener('mouseout', stopDrawing);
-        // Build DOM
-        util_5.buildDomTree(component.domElement, [
+        // Create main container for two-column layout
+        const mainContainer = document.createElement("div");
+        mainContainer.className = "editorMainContainer";
+        // Left column - Editor tools and canvas
+        const leftColumn = document.createElement("div");
+        leftColumn.className = "editorLeftColumn";
+        // Right column - Color reference
+        const rightColumn = document.createElement("div");
+        rightColumn.className = "editorRightColumn";
+        rightColumn.appendChild(colorReference.domElement);
+        // Build left column content
+        util_5.buildDomTree(leftColumn, [
             document.createElement("p"), [
                 "Edit the generated image. Add player start/end points and polish the dungeon layout."
             ],
@@ -1635,9 +2021,12 @@ System.register("components/imageEditor", ["util", "components/common"], functio
             ],
             canvas,
         ]);
+        mainContainer.appendChild(leftColumn);
+        mainContainer.appendChild(rightColumn);
+        component.domElement.appendChild(mainContainer);
         return component;
     }
-    exports_17("createImageEditor", createImageEditor);
+    exports_19("createImageEditor", createImageEditor);
     return {
         setters: [
             function (util_5_1) {
@@ -1645,299 +2034,43 @@ System.register("components/imageEditor", ["util", "components/common"], functio
             },
             function (common_4_1) {
                 common_4 = common_4_1;
+            },
+            function (colorReference_1_1) {
+                colorReference_1 = colorReference_1_1;
             }
         ],
         execute: function () {
         }
     };
 });
-System.register("colorMapping", [], function (exports_18, context_18) {
+System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (exports_20, context_20) {
     "use strict";
-    var GameElement, DEFAULT_COLOR_MAPPINGS;
-    var __moduleName = context_18 && context_18.id;
-    function hexToRgb(hex) {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : null;
-    }
-    exports_18("hexToRgb", hexToRgb);
-    function rgbToHex(r, g, b) {
-        return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-    }
-    exports_18("rgbToHex", rgbToHex);
-    function colorDistance(color1, color2) {
-        return Math.sqrt(Math.pow(color1.r - color2.r, 2) +
-            Math.pow(color1.g - color2.g, 2) +
-            Math.pow(color1.b - color2.b, 2));
-    }
-    exports_18("colorDistance", colorDistance);
-    // Find the closest matching color from the mapping
-    function findClosestColor(r, g, b, mappings) {
-        const targetColor = { r, g, b };
-        let closestElement = GameElement.FLOOR; // Default
-        let minDistance = Infinity;
-        for (const [hexColor, element] of Object.entries(mappings)) {
-            const rgbColor = hexToRgb(hexColor);
-            if (rgbColor) {
-                const distance = colorDistance(targetColor, rgbColor);
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    closestElement = element;
-                }
-            }
-        }
-        return closestElement;
-    }
-    exports_18("findClosestColor", findClosestColor);
-    // Convert image data to game map
-    function imageDataToGameMap(imageData, mappings = DEFAULT_COLOR_MAPPINGS) {
-        const { data, width, height } = imageData;
-        const gameMap = [];
-        for (let y = 0; y < height; y++) {
-            const row = [];
-            for (let x = 0; x < width; x++) {
-                const index = (y * width + x) * 4;
-                const r = data[index];
-                const g = data[index + 1];
-                const b = data[index + 2];
-                const element = findClosestColor(r, g, b, mappings);
-                row.push(element);
-            }
-            gameMap.push(row);
-        }
-        return gameMap;
-    }
-    exports_18("imageDataToGameMap", imageDataToGameMap);
-    // Find player start position
-    function findPlayerStart(gameMap) {
-        for (let y = 0; y < gameMap.length; y++) {
-            for (let x = 0; x < gameMap[y].length; x++) {
-                if (gameMap[y][x] === GameElement.PLAYER_START) {
-                    return { x, y };
-                }
-            }
-        }
-        return null;
-    }
-    exports_18("findPlayerStart", findPlayerStart);
-    // Find player finish position
-    function findPlayerFinish(gameMap) {
-        for (let y = 0; y < gameMap.length; y++) {
-            for (let x = 0; x < gameMap[y].length; x++) {
-                if (gameMap[y][x] === GameElement.PLAYER_FINISH) {
-                    return { x, y };
-                }
-            }
-        }
-        return null;
-    }
-    exports_18("findPlayerFinish", findPlayerFinish);
-    // Get all enemy positions
-    function findEnemies(gameMap) {
-        const enemies = [];
-        for (let y = 0; y < gameMap.length; y++) {
-            for (let x = 0; x < gameMap[y].length; x++) {
-                if (gameMap[y][x] === GameElement.ENEMY) {
-                    enemies.push({ x, y });
-                }
-            }
-        }
-        return enemies;
-    }
-    exports_18("findEnemies", findEnemies);
-    // Check if a position is walkable (not a wall)
-    function isWalkable(gameMap, x, y) {
-        if (y < 0 || y >= gameMap.length || x < 0 || x >= gameMap[y].length) {
-            return false;
-        }
-        const element = gameMap[y][x];
-        return element !== GameElement.WALL && element !== GameElement.DOOR;
-    }
-    exports_18("isWalkable", isWalkable);
-    function getElementProperties(element) {
-        switch (element) {
-            case GameElement.WALL:
-                return {
-                    walkable: false,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: false,
-                    description: "A solid wall blocking your path."
-                };
-            case GameElement.DANGER:
-                return {
-                    walkable: true,
-                    dangerous: true,
-                    collectible: false,
-                    interactive: false,
-                    description: "Dangerous terrain that damages you when stepped on."
-                };
-            case GameElement.WATER:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: false,
-                    description: "Water that slows your movement."
-                };
-            case GameElement.ENEMY:
-                return {
-                    walkable: true,
-                    dangerous: true,
-                    collectible: false,
-                    interactive: true,
-                    description: "An enemy that will attack you on sight."
-                };
-            case GameElement.GRASS:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: false,
-                    description: "Soft grass that cushions your steps."
-                };
-            case GameElement.FIRE:
-                return {
-                    walkable: true,
-                    dangerous: true,
-                    collectible: false,
-                    interactive: false,
-                    description: "Burning fire that damages you when stepped on."
-                };
-            case GameElement.PLAYER_START:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: false,
-                    description: "Your starting position in the dungeon."
-                };
-            case GameElement.PLAYER_FINISH:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: true,
-                    description: "The exit from the dungeon."
-                };
-            case GameElement.TREASURE:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: true,
-                    interactive: false,
-                    description: "Valuable treasure waiting to be collected."
-                };
-            case GameElement.KEY:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: true,
-                    interactive: false,
-                    description: "A key that can open locked doors."
-                };
-            case GameElement.DOOR:
-                return {
-                    walkable: false,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: true,
-                    description: "A locked door that requires a key to open."
-                };
-            case GameElement.STAIRS:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: true,
-                    description: "Stairs leading to another level."
-                };
-            case GameElement.FLOOR:
-            default:
-                return {
-                    walkable: true,
-                    dangerous: false,
-                    collectible: false,
-                    interactive: false,
-                    description: "Regular dungeon floor."
-                };
-        }
-    }
-    exports_18("getElementProperties", getElementProperties);
-    return {
-        setters: [],
-        execute: function () {
-            // Color mapping system for converting image colors to game elements
-            (function (GameElement) {
-                GameElement["WALL"] = "wall";
-                GameElement["DANGER"] = "danger";
-                GameElement["WATER"] = "water";
-                GameElement["ENEMY"] = "enemy";
-                GameElement["GRASS"] = "grass";
-                GameElement["FIRE"] = "fire";
-                GameElement["PLAYER_START"] = "player_start";
-                GameElement["PLAYER_FINISH"] = "player_finish";
-                GameElement["FLOOR"] = "floor";
-                GameElement["TREASURE"] = "treasure";
-                GameElement["KEY"] = "key";
-                GameElement["DOOR"] = "door";
-                GameElement["STAIRS"] = "stairs";
-            })(GameElement || (exports_18("GameElement", GameElement = {})));
-            // Default color mappings based on user requirements
-            exports_18("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
-                '#000000': GameElement.WALL, // Black - wall
-                '#FF0000': GameElement.DANGER, // Red - danger
-                '#0000FF': GameElement.WATER, // Blue - water
-                '#800080': GameElement.ENEMY, // Purple - enemy
-                '#008000': GameElement.GRASS, // Green - grass
-                '#FFA500': GameElement.FIRE, // Orange - fire
-                '#006400': GameElement.PLAYER_START, // Dark green - player start
-                '#8B0000': GameElement.PLAYER_FINISH, // Dark red - player finish
-                // Additional mappings for more variety
-                '#FFFF00': GameElement.TREASURE, // Yellow - treasure
-                '#FFD700': GameElement.KEY, // Gold - key
-                '#8B4513': GameElement.DOOR, // Brown - door
-                '#C0C0C0': GameElement.STAIRS, // Silver - stairs
-                '#FFFFFF': GameElement.FLOOR, // White - floor (default)
-            });
-        }
-    };
-});
-System.register("components/dungeonCrawler", ["util", "colorMapping"], function (exports_19, context_19) {
-    "use strict";
-    var util_6, colorMapping_1;
-    var __moduleName = context_19 && context_19.id;
-    function createDungeonCrawler() {
+    var colorMapping_2;
+    var __moduleName = context_20 && context_20.id;
+    function createThreeJSDungeonCrawler() {
         const component = {
-            domElement: Object.assign(document.createElement("div"), { className: "dungeonCrawlerComponent" }),
-            startGame: (gameMap, playerStart) => {
-                currentGameMap = gameMap;
-                player.x = playerStart.x + 0.5;
-                player.y = playerStart.y + 0.5;
-                player.angle = 0;
-                player.health = player.maxHealth;
-                player.keys = 0;
-                player.treasures = 0;
-                enemies = [];
-                gameRunning = true;
-                lastFrameTime = Date.now();
-                gameLoop();
+            domElement: Object.assign(document.createElement("div"), { className: "threeJSDungeonCrawlerComponent" }),
+            startGame: async (gameMap, playerStart) => {
+                await initializeGame(gameMap, playerStart);
             },
             stopGame: () => {
-                gameRunning = false;
-                if (animationFrameId) {
-                    cancelAnimationFrame(animationFrameId);
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                }
+                if (renderer && component.domElement.contains(renderer.domElement)) {
+                    component.domElement.removeChild(renderer.domElement);
                 }
             }
         };
+        // Three.js components
+        let scene;
+        let camera;
+        let renderer;
+        let animationId;
         // Game state
         let currentGameMap = [];
+        let enemies = [];
         let gameRunning = false;
-        let animationFrameId;
-        let lastFrameTime = 0;
         // Player state
         const player = {
             x: 0,
@@ -1948,59 +2081,205 @@ System.register("components/dungeonCrawler", ["util", "colorMapping"], function 
             keys: 0,
             treasures: 0
         };
-        // Enemy state
-        let enemies = [];
         // Game constants
-        const CANVAS_WIDTH = 800;
-        const CANVAS_HEIGHT = 600;
-        const FOV = Math.PI / 3; // 60 degrees field of view
-        const WALL_HEIGHT = 2.0; // Made walls taller
-        const PLAYER_HEIGHT = 0.5;
+        const BASE_WIDTH = 480;
+        const BASE_HEIGHT = 320;
+        const SCALE_FACTOR = 2; // Upscale to 960x640
+        const WALL_HEIGHT = 2.0;
         const MOVE_SPEED = 0.05;
-        const ROTATE_SPEED = 0.04; // Slightly faster rotation
+        const ROTATE_SPEED = 0.03;
         // Input state
         const keysPressed = new Set();
-        // Create canvases
-        const gameCanvas = document.createElement("canvas");
-        gameCanvas.width = CANVAS_WIDTH;
-        gameCanvas.height = CANVAS_HEIGHT;
-        gameCanvas.className = "dungeonGameCanvas";
-        gameCanvas.style.border = "1px solid #ccc";
-        gameCanvas.style.backgroundColor = "#000";
-        const ctx = gameCanvas.getContext("2d");
-        // UI elements
-        const healthBar = document.createElement("div");
-        healthBar.className = "healthBar";
-        healthBar.innerHTML = `
-    <div class="healthLabel">Health:</div>
-    <div class="healthValue">100/100</div>
-  `;
-        const inventory = document.createElement("div");
-        inventory.className = "inventory";
-        inventory.innerHTML = `
-    <div class="inventoryItem">Keys: <span id="keyCount">0</span></div>
-    <div class="inventoryItem">Treasures: <span id="treasureCount">0</span></div>
-  `;
-        const controls = document.createElement("div");
-        controls.className = "controls";
-        controls.innerHTML = `
-    <h4>Controls:</h4>
-    <p>WASD - Move</p>
-    <p>A/D or Left/Right arrows - Turn</p>
-    <p>Space - Attack</p>
-    <p>E - Interact</p>
-  `;
-        // Input handling
-        function handleKeyDown(e) {
-            keysPressed.add(e.code.toLowerCase());
+        async function initializeGame(gameMap, playerStart) {
+            currentGameMap = gameMap;
+            player.x = playerStart.x + 0.5;
+            player.y = playerStart.y + 0.5;
+            player.angle = 0;
+            player.health = player.maxHealth;
+            player.keys = 0;
+            player.treasures = 0;
+            enemies = [];
+            gameRunning = true;
+            // Check if Three.js is available
+            if (typeof THREE === 'undefined') {
+                console.error('Three.js is not loaded. Make sure the CDN script is working.');
+                const errorMsg = document.createElement('div');
+                errorMsg.style.cssText = 'color: red; font-size: 18px; text-align: center; margin: 20px; padding: 20px; border: 2px solid red; border-radius: 10px; background: #ffe6e6;';
+                errorMsg.innerHTML = `
+        ❌ <strong>Three.js failed to load!</strong><br>
+        Please check your internet connection and refresh the page.<br>
+        <br>
+        <small>If the problem persists, try:</small><br>
+        <code>npm run dev</code> to restart the server
+      `;
+                component.domElement.appendChild(errorMsg);
+                return;
+            }
+            // THREE is already declared globally
+            // Initialize Three.js scene
+            await setupThreeJS();
+            // Create the dungeon geometry
+            createDungeon();
+            // Start the game loop
+            gameLoop();
         }
-        function handleKeyUp(e) {
-            keysPressed.delete(e.code.toLowerCase());
+        async function setupThreeJS() {
+            // Create scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2a); // Dark blue background
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, BASE_WIDTH / BASE_HEIGHT, 0.1, 1000);
+            camera.position.set(player.x, 1, player.y);
+            camera.lookAt(player.x + Math.cos(player.angle), 1, player.y + Math.sin(player.angle));
+            // Create renderer with upscaling
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(BASE_WIDTH * SCALE_FACTOR, BASE_HEIGHT * SCALE_FACTOR);
+            renderer.domElement.style.width = `${BASE_WIDTH * SCALE_FACTOR}px`;
+            renderer.domElement.style.height = `${BASE_HEIGHT * SCALE_FACTOR}px`;
+            renderer.domElement.style.imageRendering = 'pixelated';
+            renderer.setPixelRatio(window.devicePixelRatio);
+            // Add lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 10, 5);
+            scene.add(directionalLight);
+            // Add renderer to DOM
+            component.domElement.appendChild(renderer.domElement);
         }
-        function handleMouseMove(e) {
-            // Mouse movement disabled - using keyboard for turning
+        function createDungeon() {
+            const mapWidth = currentGameMap[0].length;
+            const mapHeight = currentGameMap.length;
+            // Create floor
+            createFloor(mapWidth, mapHeight);
+            // Create walls
+            createWalls(mapWidth, mapHeight);
+            // Create sprites for interactive elements
+            createSprites();
         }
-        // Game logic
+        function createFloor(width, height) {
+            // Create floor geometry
+            const floorGeometry = new THREE.PlaneGeometry(width, height);
+            const floorMaterial = new THREE.MeshLambertMaterial({
+                color: 0x444444,
+                transparent: true,
+                opacity: 0.9
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.set(width / 2 - 0.5, 0, height / 2 - 0.5);
+            scene.add(floor);
+            // Add floor texture pattern
+            createFloorTexture(width, height);
+        }
+        function createFloorTexture(width, height) {
+            const tileSize = 1;
+            const tilesX = Math.floor(width / tileSize);
+            const tilesY = Math.floor(height / tileSize);
+            for (let x = 0; x < tilesX; x++) {
+                for (let y = 0; y < tilesY; y++) {
+                    const color = (x + y) % 2 === 0 ? 0x555555 : 0x333333;
+                    const tileGeometry = new THREE.PlaneGeometry(tileSize * 0.95, tileSize * 0.95);
+                    const tileMaterial = new THREE.MeshLambertMaterial({ color });
+                    const tile = new THREE.Mesh(tileGeometry, tileMaterial);
+                    tile.rotation.x = -Math.PI / 2;
+                    tile.position.set(x * tileSize, 0.01, y * tileSize);
+                    scene.add(tile);
+                }
+            }
+        }
+        function createWalls(width, height) {
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const element = currentGameMap[y][x];
+                    const properties = colorMapping_2.getElementProperties(element);
+                    if (!properties.walkable) {
+                        createWall(x, y, element);
+                    }
+                }
+            }
+        }
+        function createWall(x, y, element) {
+            const wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
+            const wallMaterial = new THREE.MeshLambertMaterial({
+                color: getWallColor(element),
+                transparent: false
+            });
+            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+            wall.position.set(x, WALL_HEIGHT / 2, y);
+            scene.add(wall);
+        }
+        function getWallColor(element) {
+            switch (element) {
+                case colorMapping_2.GameElement.WALL:
+                    return 0x666666; // Stone gray
+                case colorMapping_2.GameElement.DOOR:
+                    return 0x8B4513; // Brown wood
+                case colorMapping_2.GameElement.DANGER:
+                    return 0x8B0000; // Dark red
+                case colorMapping_2.GameElement.FIRE:
+                    return 0xFF4500; // Orange red
+                default:
+                    return 0x555555;
+            }
+        }
+        function createSprites() {
+            for (let y = 0; y < currentGameMap.length; y++) {
+                for (let x = 0; x < currentGameMap[y].length; x++) {
+                    const element = currentGameMap[y][x];
+                    const properties = colorMapping_2.getElementProperties(element);
+                    if (properties.interactive || element === colorMapping_2.GameElement.ENEMY) {
+                        createSprite(x, y, element);
+                    }
+                }
+            }
+        }
+        function createSprite(x, y, element) {
+            // Create a canvas for the sprite texture
+            const canvas = document.createElement('canvas');
+            canvas.width = 32;
+            canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            // Draw simple colored square based on element type
+            ctx.fillStyle = getSpriteColor(element);
+            ctx.fillRect(0, 0, 32, 32);
+            // Add border
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, 30, 30);
+            // Create texture from canvas
+            const texture = new THREE.CanvasTexture(canvas);
+            // Create sprite material
+            const spriteMaterial = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true
+            });
+            // Create sprite
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(x, 1, y);
+            sprite.scale.set(0.8, 0.8, 0.8);
+            scene.add(sprite);
+        }
+        function getSpriteColor(element) {
+            switch (element) {
+                case colorMapping_2.GameElement.ENEMY:
+                    return '#ff0000'; // Red
+                case colorMapping_2.GameElement.DANGER:
+                    return '#ff6600'; // Orange
+                case colorMapping_2.GameElement.PLAYER_FINISH:
+                    return '#00ff00'; // Green
+                case colorMapping_2.GameElement.TREASURE:
+                    return '#ffff00'; // Yellow
+                case colorMapping_2.GameElement.KEY:
+                    return '#ffd700'; // Gold
+                case colorMapping_2.GameElement.DOOR:
+                    return '#8B4513'; // Brown
+                case colorMapping_2.GameElement.STAIRS:
+                    return '#c0c0c0'; // Silver
+                default:
+                    return '#888888';
+            }
+        }
         function updatePlayer() {
             let newX = player.x;
             let newY = player.y;
@@ -2021,11 +2300,11 @@ System.register("components/dungeonCrawler", ["util", "colorMapping"], function 
                 newX -= Math.cos(player.angle - Math.PI / 2) * MOVE_SPEED;
                 newY -= Math.sin(player.angle - Math.PI / 2) * MOVE_SPEED;
             }
-            // Handle rotation - A/D or Left/Right arrows
-            if (keysPressed.has('keya') || keysPressed.has('arrowleft')) {
+            // Handle rotation
+            if (keysPressed.has('keyq')) {
                 player.angle -= ROTATE_SPEED;
             }
-            if (keysPressed.has('keyd') || keysPressed.has('arrowright')) {
+            if (keysPressed.has('keye')) {
                 player.angle += ROTATE_SPEED;
             }
             // Check collision and update position
@@ -2033,74 +2312,11 @@ System.register("components/dungeonCrawler", ["util", "colorMapping"], function 
                 player.x = newX;
                 player.y = newY;
             }
-            // Check for interactions
-            const playerTileX = Math.floor(player.x);
-            const playerTileY = Math.floor(player.y);
-            if (playerTileX >= 0 && playerTileX < currentGameMap[0].length &&
-                playerTileY >= 0 && playerTileY < currentGameMap.length) {
-                const element = currentGameMap[playerTileY][playerTileX];
-                const properties = colorMapping_1.getElementProperties(element);
-                // Handle dangerous tiles
-                if (properties.dangerous && Math.random() < 0.01) { // 1% chance per frame
-                    player.health -= 5;
-                    if (player.health <= 0) {
-                        gameRunning = false;
-                        if (component.onGameOver) {
-                            component.onGameOver();
-                        }
-                    }
-                }
-                // Handle collectibles
-                if (properties.collectible) {
-                    if (element === colorMapping_1.GameElement.TREASURE) {
-                        player.treasures++;
-                        currentGameMap[playerTileY][playerTileX] = colorMapping_1.GameElement.FLOOR;
-                    }
-                    else if (element === colorMapping_1.GameElement.KEY) {
-                        player.keys++;
-                        currentGameMap[playerTileY][playerTileX] = colorMapping_1.GameElement.FLOOR;
-                    }
-                }
-                // Handle finish condition
-                if (element === colorMapping_1.GameElement.PLAYER_FINISH) {
-                    gameRunning = false;
-                    if (component.onGameComplete) {
-                        component.onGameComplete();
-                    }
-                }
-            }
-        }
-        function updateEnemies() {
-            const currentTime = Date.now();
-            enemies.forEach((enemy, index) => {
-                if (currentTime - enemy.lastMove > 1000) { // Move every second
-                    // Simple AI: move towards player
-                    const dx = player.x - enemy.x;
-                    const dy = player.y - enemy.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    if (distance > 0) {
-                        const moveX = (dx / distance) * 0.1;
-                        const moveY = (dy / distance) * 0.1;
-                        const newX = enemy.x + moveX;
-                        const newY = enemy.y + moveY;
-                        if (isValidPosition(newX, newY)) {
-                            enemy.x = newX;
-                            enemy.y = newY;
-                        }
-                    }
-                    enemy.lastMove = currentTime;
-                    // Check if enemy is close enough to attack
-                    if (distance < 0.5) {
-                        player.health -= 10;
-                        if (player.health <= 0) {
-                            gameRunning = false;
-                            if (component.onGameOver) {
-                                component.onGameOver();
-                            }
-                        }
-                    }
-                }
-            });
+            // Update camera position
+            camera.position.set(player.x, 1, player.y);
+            const lookX = player.x + Math.cos(player.angle) * 2;
+            const lookZ = player.y + Math.sin(player.angle) * 2;
+            camera.lookAt(lookX, 1, lookZ);
         }
         function isValidPosition(x, y) {
             const tileX = Math.floor(x);
@@ -2110,150 +2326,43 @@ System.register("components/dungeonCrawler", ["util", "colorMapping"], function 
                 return false;
             }
             const element = currentGameMap[tileY][tileX];
-            const properties = colorMapping_1.getElementProperties(element);
+            const properties = colorMapping_2.getElementProperties(element);
             return properties.walkable;
         }
-        // Rendering
-        function render() {
-            // Clear canvas
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-            // Draw ceiling (darker)
-            ctx.fillStyle = "#2a2a2a";
-            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
-            // Draw floor (lighter)
-            ctx.fillStyle = "#4a4a4a";
-            ctx.fillRect(0, CANVAS_HEIGHT / 2, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
-            // Raycasting
-            const numRays = CANVAS_WIDTH;
-            const angleStep = FOV / numRays;
-            for (let i = 0; i < numRays; i++) {
-                const rayAngle = player.angle - FOV / 2 + angleStep * i;
-                const distance = castRay(rayAngle);
-                // Calculate wall height
-                const wallHeight = (WALL_HEIGHT / distance) * (CANVAS_HEIGHT / 2);
-                const wallTop = (CANVAS_HEIGHT / 2) - wallHeight / 2;
-                const wallBottom = (CANVAS_HEIGHT / 2) + wallHeight / 2;
-                // Choose wall color based on distance and element
-                const element = getWallElement(rayAngle, distance);
-                const color = getWallColor(element, distance);
-                ctx.fillStyle = color;
-                ctx.fillRect(i, wallTop, 1, wallBottom - wallTop);
-            }
-            // Draw UI
-            updateUI();
-        }
-        function castRay(angle) {
-            const dx = Math.cos(angle);
-            const dy = Math.sin(angle);
-            let x = player.x;
-            let y = player.y;
-            let distance = 0;
-            while (distance < 20) { // Max view distance
-                x += dx * 0.01;
-                y += dy * 0.01;
-                distance += 0.01;
-                const tileX = Math.floor(x);
-                const tileY = Math.floor(y);
-                if (tileX < 0 || tileX >= currentGameMap[0].length ||
-                    tileY < 0 || tileY >= currentGameMap.length) {
-                    return distance;
-                }
-                const element = currentGameMap[tileY][tileX];
-                const properties = colorMapping_1.getElementProperties(element);
-                if (!properties.walkable) {
-                    return distance;
-                }
-            }
-            return 20;
-        }
-        function getWallElement(angle, distance) {
-            const x = player.x + Math.cos(angle) * distance;
-            const y = player.y + Math.sin(angle) * distance;
-            const tileX = Math.floor(x);
-            const tileY = Math.floor(y);
-            if (tileX < 0 || tileX >= currentGameMap[0].length ||
-                tileY < 0 || tileY >= currentGameMap.length) {
-                return colorMapping_1.GameElement.WALL;
-            }
-            return currentGameMap[tileY][tileX];
-        }
-        function getWallColor(element, distance) {
-            // Distance fog
-            const fogFactor = Math.max(0, 1 - distance / 10);
-            const brightness = Math.floor(255 * fogFactor);
-            switch (element) {
-                case colorMapping_1.GameElement.WALL:
-                    return `rgb(${brightness}, ${brightness}, ${brightness})`;
-                case colorMapping_1.GameElement.DOOR:
-                    return `rgb(${brightness}, ${brightness * 0.5}, 0)`;
-                case colorMapping_1.GameElement.DANGER:
-                    return `rgb(${brightness}, ${brightness * 0.3}, ${brightness * 0.3})`;
-                case colorMapping_1.GameElement.FIRE:
-                    return `rgb(${brightness}, ${brightness * 0.5}, 0)`;
-                default:
-                    return `rgb(${brightness}, ${brightness}, ${brightness})`;
-            }
-        }
-        function updateUI() {
-            // Update health bar
-            const healthValue = healthBar.querySelector('.healthValue');
-            healthValue.textContent = `${Math.max(0, player.health)}/${player.maxHealth}`;
-            // Update inventory
-            const keyCount = inventory.querySelector('#keyCount');
-            const treasureCount = inventory.querySelector('#treasureCount');
-            keyCount.textContent = player.keys.toString();
-            treasureCount.textContent = player.treasures.toString();
-        }
-        // Game loop
         function gameLoop() {
             if (!gameRunning)
                 return;
-            const currentTime = Date.now();
-            const deltaTime = currentTime - lastFrameTime;
-            lastFrameTime = currentTime;
             updatePlayer();
-            updateEnemies();
-            render();
-            animationFrameId = requestAnimationFrame(gameLoop);
+            renderer.render(scene, camera);
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        // Input handling
+        function handleKeyDown(e) {
+            keysPressed.add(e.code.toLowerCase());
+        }
+        function handleKeyUp(e) {
+            keysPressed.delete(e.code.toLowerCase());
         }
         // Event listeners
         document.addEventListener('keydown', handleKeyDown);
         document.addEventListener('keyup', handleKeyUp);
-        // Removed mouse movement listener - using keyboard for turning
-        // Build DOM
-        const gameUIContainer = document.createElement("div");
-        gameUIContainer.className = "gameUI";
-        gameUIContainer.appendChild(healthBar);
-        gameUIContainer.appendChild(inventory);
-        gameUIContainer.appendChild(controls);
-        util_6.buildDomTree(component.domElement, [
-            document.createElement("p"), [
-                "Navigate through the dungeon! Avoid enemies and dangers, collect treasures and keys, and reach the finish."
-            ],
-            gameUIContainer,
-            gameCanvas,
-        ]);
         return component;
     }
-    exports_19("createDungeonCrawler", createDungeonCrawler);
+    exports_20("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
     return {
         setters: [
-            function (util_6_1) {
-                util_6 = util_6_1;
-            },
-            function (colorMapping_1_1) {
-                colorMapping_1 = colorMapping_1_1;
+            function (colorMapping_2_1) {
+                colorMapping_2 = colorMapping_2_1;
             }
         ],
         execute: function () {
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/dungeonCrawler", "colorMapping"], function (exports_20, context_20) {
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "colorMapping"], function (exports_21, context_21) {
     "use strict";
-    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, dungeonCrawler_1, colorMapping_2, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, inputContainer, presetPicker, drawingCanvas, imageEditor, dungeonCrawler, mainElem;
-    var __moduleName = context_20 && context_20.id;
+    var run_1, util_6, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, colorMapping_3, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, inputContainer, presetPicker, drawingCanvas, imageEditor, dungeonCrawler, mainElem;
+    var __moduleName = context_21 && context_21.id;
     // Tab switching logic for input tabs
     function switchInputTab(activeTab, inactiveTab, showElement) {
         activeTab.classList.add("active");
@@ -2292,7 +2401,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         }
     }
     function buildInputMode() {
-        util_7.buildDomTree(contentContainer, [
+        util_6.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Input bitmap"],
             inputTabContainer, [
                 presetTab,
@@ -2328,7 +2437,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         editImageButton.onclick = () => {
             switchMode(AppMode.IMAGE_EDITING);
         };
-        util_7.buildDomTree(contentContainer, [
+        util_6.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Wave Function Collapse Generation"],
             document.createElement("div"), [
                 restartWfc,
@@ -2342,7 +2451,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         if (generatedImageData) {
             imageEditor.loadImage(generatedImageData);
         }
-        util_7.buildDomTree(contentContainer, [
+        util_6.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Edit Generated Image"],
             document.createElement("p"), [
                 "Use the drawing tools to add player start (dark green) and finish (dark red) points, polish routes, and adjust the dungeon layout."
@@ -2351,40 +2460,45 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         ]);
     }
     function buildDungeonCrawlerMode() {
-        util_7.buildDomTree(contentContainer, [
+        util_6.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Dungeon Crawler Game"],
             dungeonCrawler.domElement,
         ]);
     }
-    function startDungeonCrawler() {
+    async function startDungeonCrawler() {
         if (!generatedImageData)
             return;
         // Convert image to game map
-        gameMap = colorMapping_2.imageDataToGameMap(generatedImageData);
+        gameMap = colorMapping_3.imageDataToGameMap(generatedImageData);
         // Find player start position
-        const playerStart = colorMapping_2.findPlayerStart(gameMap);
+        const playerStart = colorMapping_3.findPlayerStart(gameMap);
         if (!playerStart) {
             alert("No player start position found! Please add a dark green (#006400) pixel to mark the start.");
             switchMode(AppMode.IMAGE_EDITING);
             return;
         }
         // Find player finish position
-        const playerFinish = colorMapping_2.findPlayerFinish(gameMap);
+        const playerFinish = colorMapping_3.findPlayerFinish(gameMap);
         if (!playerFinish) {
             alert("No player finish position found! Please add a dark red (#8B0000) pixel to mark the finish.");
             switchMode(AppMode.IMAGE_EDITING);
             return;
         }
         // Start the game
-        dungeonCrawler.startGame(gameMap, playerStart);
+        try {
+            await dungeonCrawler.startGame(gameMap, playerStart);
+        }
+        catch (error) {
+            console.error('Failed to start game:', error);
+        }
     }
     return {
         setters: [
             function (run_1_1) {
                 run_1 = run_1_1;
             },
-            function (util_7_1) {
-                util_7 = util_7_1;
+            function (util_6_1) {
+                util_6 = util_6_1;
             },
             function (wfcOptions_1_1) {
                 wfcOptions_1 = wfcOptions_1_1;
@@ -2398,11 +2512,11 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             function (imageEditor_1_1) {
                 imageEditor_1 = imageEditor_1_1;
             },
-            function (dungeonCrawler_1_1) {
-                dungeonCrawler_1 = dungeonCrawler_1_1;
+            function (threeJSDungeonCrawler_1_1) {
+                threeJSDungeonCrawler_1 = threeJSDungeonCrawler_1_1;
             },
-            function (colorMapping_2_1) {
-                colorMapping_2 = colorMapping_2_1;
+            function (colorMapping_3_1) {
+                colorMapping_3 = colorMapping_3_1;
             }
         ],
         execute: function () {
@@ -2496,8 +2610,8 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                 switchMode(AppMode.DUNGEON_CRAWLER);
                 startDungeonCrawler();
             };
-            // Dungeon crawler
-            dungeonCrawler = dungeonCrawler_1.createDungeonCrawler();
+            // Three.js Dungeon crawler
+            dungeonCrawler = threeJSDungeonCrawler_1.createThreeJSDungeonCrawler();
             dungeonCrawler.onGameComplete = () => {
                 alert("Congratulations! You completed the dungeon!");
                 switchMode(AppMode.INPUT);
@@ -2516,7 +2630,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             // Initialize the application
             mainElem = document.querySelector("main");
             if (mainElem) {
-                const content = util_7.buildDomTree(mainElem, [
+                const content = util_6.buildDomTree(mainElem, [
                     document.createElement("h2"), ["Wave Function Collapse Dungeon Generator"],
                     modeTabContainer, [
                         inputModeTab,
