@@ -6,6 +6,7 @@ import { createPresetPicker } from "./components/presetPicker";
 import { createDrawingCanvas } from "./components/drawingCanvas";
 import { createImageEditor } from "./components/imageEditor";
 import { createThreeJSDungeonCrawler } from "./components/threeJSDungeonCrawler";
+import { createImageUploader } from "./components/imageUploader";
 import { imageDataToGameMap, findPlayerStart, findPlayerFinish, GameElement } from "./colorMapping";
 
 let wfc: IWaveFunctionCollapse | undefined;
@@ -95,6 +96,10 @@ const drawTab = document.createElement("button");
 drawTab.textContent = "Draw Custom";
 drawTab.className = "tab";
 
+const uploadTab = document.createElement("button");
+uploadTab.textContent = "Upload Map";
+uploadTab.className = "tab";
+
 const inputContainer = document.createElement("div");
 inputContainer.className = "inputContainer";
 
@@ -114,6 +119,32 @@ drawingCanvas.onDrawComplete = (image) => {
   wfcOptions.updateOptions({}); // Reset to defaults for custom drawings
   switchMode(AppMode.WFC_GENERATION);
   startWFC();
+};
+
+// Image uploader for direct map upload
+const imageUploader = createImageUploader();
+imageUploader.onUploadComplete = (image) => {
+  // Store the uploaded image as generated image data
+  generatedImageData = image;
+
+  // Check if the uploaded map has required start/finish points
+  const tempGameMap = imageDataToGameMap(image);
+  const playerStart = findPlayerStart(tempGameMap);
+  const playerFinish = findPlayerFinish(tempGameMap);
+
+  if (!playerStart || !playerFinish) {
+    // Missing start or finish points - go to image editor first
+    const missingElements = [];
+    if (!playerStart) missingElements.push("player start (dark green)");
+    if (!playerFinish) missingElements.push("player finish (dark red)");
+
+    alert(`Your uploaded map is missing required elements: ${missingElements.join(" and ")}. Please use the image editor to add them before playing.`);
+    switchMode(AppMode.IMAGE_EDITING);
+  } else {
+    // Map is complete - go directly to dungeon crawler
+    switchMode(AppMode.DUNGEON_CRAWLER);
+    startDungeonCrawler();
+  }
 };
 
 // Image editor
@@ -137,17 +168,19 @@ dungeonCrawler.onGameOver = () => {
 };
 
 // Tab switching logic for input tabs
-function switchInputTab(activeTab: HTMLElement, inactiveTab: HTMLElement, showElement: Node) {
+function switchInputTab(activeTab: HTMLElement, inactiveTabs: HTMLElement[], showElement: Node) {
+  // Remove active class from all tabs
+  inactiveTabs.forEach(tab => tab.classList.remove("active"));
   activeTab.classList.add("active");
-  inactiveTab.classList.remove("active");
 
   // Clear and add the correct input method
   inputContainer.innerHTML = "";
   inputContainer.appendChild(showElement as Node);
 }
 
-presetTab.onclick = () => switchInputTab(presetTab, drawTab, presetPicker.domElement);
-drawTab.onclick = () => switchInputTab(drawTab, presetTab, drawingCanvas.domElement);
+presetTab.onclick = () => switchInputTab(presetTab, [drawTab, uploadTab], presetPicker.domElement);
+drawTab.onclick = () => switchInputTab(drawTab, [presetTab, uploadTab], drawingCanvas.domElement);
+uploadTab.onclick = () => switchInputTab(uploadTab, [presetTab, drawTab], imageUploader.domElement);
 
 // Mode switching logic
 function switchMode(newMode: AppMode) {
@@ -191,6 +224,7 @@ function buildInputMode() {
     inputTabContainer, [
       presetTab,
       drawTab,
+      uploadTab,
     ],
     inputContainer,
     document.createElement("h2"), ["Options"],

@@ -2088,8 +2088,18 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         const WALL_HEIGHT = 2.0;
         const MOVE_SPEED = 0.05;
         const ROTATE_SPEED = 0.03;
+        const PLAYER_COLLISION_RADIUS = 0.25; // Player collision radius - increased for better spacing from wall textures
         // Input state
         const keysPressed = new Set();
+        // Texture loader
+        const textureLoader = new THREE.TextureLoader();
+        // Mouse look variables
+        let mouseX = 0;
+        let mouseY = 0;
+        let isPointerLocked = false;
+        // Debug variables
+        let debugMode = false;
+        let debugSpheres = [];
         async function initializeGame(gameMap, playerStart) {
             currentGameMap = gameMap;
             player.x = playerStart.x + 0.5;
@@ -2120,6 +2130,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             await setupThreeJS();
             // Create the dungeon geometry
             createDungeon();
+            // Setup input event listeners
+            setupInputListeners();
             // Start the game loop
             gameLoop();
         }
@@ -2138,14 +2150,30 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             renderer.domElement.style.height = `${BASE_HEIGHT * SCALE_FACTOR}px`;
             renderer.domElement.style.imageRendering = 'pixelated';
             renderer.setPixelRatio(window.devicePixelRatio);
-            // Add lighting
-            const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
-            scene.add(ambientLight);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(10, 10, 5);
-            scene.add(directionalLight);
+            // Advanced lighting system
+            setupLighting();
+            // Enable shadows
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             // Add renderer to DOM
             component.domElement.appendChild(renderer.domElement);
+        }
+        function setupLighting() {
+            // Player torch light (follows player) - now the only light source
+            const playerTorch = new THREE.PointLight(0xffaa44, 2.0, 12);
+            playerTorch.position.set(player.x, 1.5, player.y);
+            playerTorch.castShadow = true;
+            // Enhanced shadow settings for hard shadows
+            playerTorch.shadow.mapSize.width = 2048;
+            playerTorch.shadow.mapSize.height = 2048;
+            playerTorch.shadow.camera.near = 0.1;
+            playerTorch.shadow.camera.far = 15;
+            playerTorch.shadow.bias = -0.0001; // Reduces shadow acne
+            scene.add(playerTorch);
+            // Store reference to player torch for updates
+            scene.playerTorch = playerTorch;
+            // Add atmospheric fog (darker since we have less light)
+            scene.fog = new THREE.Fog(0x000000, 3, 20);
         }
         function createDungeon() {
             const mapWidth = currentGameMap[0].length;
@@ -2156,37 +2184,48 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             createWalls(mapWidth, mapHeight);
             // Create sprites for interactive elements
             createSprites();
+            // Initialize debug visualization
+            createDebugSpheres();
         }
         function createFloor(width, height) {
             // Create floor geometry
             const floorGeometry = new THREE.PlaneGeometry(width, height);
+            // Load floor texture
+            const floorTexture = textureLoader.load('textures/floor_stone.png');
+            floorTexture.wrapS = THREE.RepeatWrapping;
+            floorTexture.wrapT = THREE.RepeatWrapping;
+            floorTexture.repeat.set(width / 4, height / 4);
             const floorMaterial = new THREE.MeshLambertMaterial({
-                color: 0x444444,
+                map: floorTexture,
                 transparent: true,
                 opacity: 0.9
             });
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
             floor.position.set(width / 2 - 0.5, 0, height / 2 - 0.5);
+            floor.receiveShadow = true;
             scene.add(floor);
-            // Add floor texture pattern
-            createFloorTexture(width, height);
+            // Create ceiling
+            createCeiling(width, height);
         }
-        function createFloorTexture(width, height) {
-            const tileSize = 1;
-            const tilesX = Math.floor(width / tileSize);
-            const tilesY = Math.floor(height / tileSize);
-            for (let x = 0; x < tilesX; x++) {
-                for (let y = 0; y < tilesY; y++) {
-                    const color = (x + y) % 2 === 0 ? 0x555555 : 0x333333;
-                    const tileGeometry = new THREE.PlaneGeometry(tileSize * 0.95, tileSize * 0.95);
-                    const tileMaterial = new THREE.MeshLambertMaterial({ color });
-                    const tile = new THREE.Mesh(tileGeometry, tileMaterial);
-                    tile.rotation.x = -Math.PI / 2;
-                    tile.position.set(x * tileSize, 0.01, y * tileSize);
-                    scene.add(tile);
-                }
-            }
+        function createCeiling(width, height) {
+            // Create ceiling geometry
+            const ceilingGeometry = new THREE.PlaneGeometry(width, height);
+            // Load ceiling texture
+            const ceilingTexture = textureLoader.load('textures/ceiling_stone.png');
+            ceilingTexture.wrapS = THREE.RepeatWrapping;
+            ceilingTexture.wrapT = THREE.RepeatWrapping;
+            ceilingTexture.repeat.set(width / 4, height / 4);
+            const ceilingMaterial = new THREE.MeshLambertMaterial({
+                map: ceilingTexture,
+                transparent: true,
+                opacity: 0.8
+            });
+            const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+            ceiling.rotation.x = Math.PI / 2; // Rotate to face down
+            ceiling.position.set(width / 2 - 0.5, WALL_HEIGHT, height / 2 - 0.5);
+            ceiling.receiveShadow = true;
+            scene.add(ceiling);
         }
         function createWalls(width, height) {
             for (let y = 0; y < height; y++) {
@@ -2200,28 +2239,76 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             }
         }
         function createWall(x, y, element) {
+            // Create wall geometry that exactly matches the collision detection expectations
+            // Wall should be 1x1 units in X and Z, WALL_HEIGHT in Y
             const wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
-            const wallMaterial = new THREE.MeshLambertMaterial({
-                color: getWallColor(element),
-                transparent: false
-            });
+            // Create material array for all 6 faces of the cube to ensure consistent texturing
+            const wallTexture = getWallTexture(element);
+            const wallMaterial = [
+                new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Right face (+X)
+                new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Left face (-X)
+                new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Top face (+Y)
+                new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Bottom face (-Y)
+                new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Front face (+Z)
+                new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }) // Back face (-Z)
+            ];
             const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+            // Position wall at grid coordinates (x, y) - this centers the wall at (x, WALL_HEIGHT/2, y)
+            // The wall will occupy space from (x-0.5, 0, y-0.5) to (x+0.5, WALL_HEIGHT, y+0.5)
             wall.position.set(x, WALL_HEIGHT / 2, y);
+            wall.castShadow = true;
+            wall.receiveShadow = true;
+            // Ensure consistent orientation
+            wall.rotation.y = 0;
+            // Add a name for debugging
+            wall.name = `wall_${x}_${y}`;
+            // DEBUG: Add wireframe to visualize wall boundaries
+            if (debugMode) {
+                const wireframeGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
+                const wireframeMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xff0000,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.3
+                });
+                const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
+                wireframe.position.copy(wall.position);
+                wireframe.name = `wireframe_${x}_${y}`;
+                scene.add(wireframe);
+            }
             scene.add(wall);
+            // DEBUG: Log wall creation for debugging
+            if (debugMode) {
+                console.log(`Created wall at (${x}, ${y}) - occupies space: (${(x - 0.5).toFixed(2)}, 0, ${(y - 0.5).toFixed(2)}) to (${(x + 0.5).toFixed(2)}, ${WALL_HEIGHT.toFixed(2)}, ${(y + 0.5).toFixed(2)})`);
+            }
         }
-        function getWallColor(element) {
+        function getWallTexture(element) {
+            let texturePath;
             switch (element) {
                 case colorMapping_2.GameElement.WALL:
-                    return 0x666666; // Stone gray
+                    texturePath = 'textures/wall_stone.png';
+                    break;
                 case colorMapping_2.GameElement.DOOR:
-                    return 0x8B4513; // Brown wood
+                    texturePath = 'textures/wood_texture.png';
+                    break;
                 case colorMapping_2.GameElement.DANGER:
-                    return 0x8B0000; // Dark red
+                    texturePath = 'textures/danger_texture.png';
+                    break;
                 case colorMapping_2.GameElement.FIRE:
-                    return 0xFF4500; // Orange red
+                    texturePath = 'textures/fire_texture.png';
+                    break;
                 default:
-                    return 0x555555;
+                    texturePath = 'textures/wall_stone.png';
             }
+            const texture = textureLoader.load(texturePath);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 1);
+            // Ensure texture is properly oriented and doesn't have artifacts
+            texture.generateMipmaps = false;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            return texture;
         }
         function createSprites() {
             for (let y = 0; y < currentGameMap.length; y++) {
@@ -2235,20 +2322,11 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             }
         }
         function createSprite(x, y, element) {
-            // Create a canvas for the sprite texture
-            const canvas = document.createElement('canvas');
-            canvas.width = 32;
-            canvas.height = 32;
-            const ctx = canvas.getContext('2d');
-            // Draw simple colored square based on element type
-            ctx.fillStyle = getSpriteColor(element);
-            ctx.fillRect(0, 0, 32, 32);
-            // Add border
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(1, 1, 30, 30);
-            // Create texture from canvas
-            const texture = new THREE.CanvasTexture(canvas);
+            const spritePath = getSpritePath(element);
+            if (!spritePath)
+                return;
+            // Load sprite texture
+            const texture = textureLoader.load(spritePath);
             // Create sprite material
             const spriteMaterial = new THREE.SpriteMaterial({
                 map: texture,
@@ -2260,24 +2338,24 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             sprite.scale.set(0.8, 0.8, 0.8);
             scene.add(sprite);
         }
-        function getSpriteColor(element) {
+        function getSpritePath(element) {
             switch (element) {
                 case colorMapping_2.GameElement.ENEMY:
-                    return '#ff0000'; // Red
+                    return 'sprites/enemy.png';
                 case colorMapping_2.GameElement.DANGER:
-                    return '#ff6600'; // Orange
+                    return 'sprites/danger.png';
                 case colorMapping_2.GameElement.PLAYER_FINISH:
-                    return '#00ff00'; // Green
+                    return 'sprites/finish.png';
                 case colorMapping_2.GameElement.TREASURE:
-                    return '#ffff00'; // Yellow
+                    return 'sprites/treasure.png';
                 case colorMapping_2.GameElement.KEY:
-                    return '#ffd700'; // Gold
+                    return 'sprites/key.png';
                 case colorMapping_2.GameElement.DOOR:
-                    return '#8B4513'; // Brown
+                    return 'sprites/door.png';
                 case colorMapping_2.GameElement.STAIRS:
-                    return '#c0c0c0'; // Silver
+                    return 'sprites/stairs.png';
                 default:
-                    return '#888888';
+                    return null;
             }
         }
         function updatePlayer() {
@@ -2307,32 +2385,322 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             if (keysPressed.has('keye')) {
                 player.angle += ROTATE_SPEED;
             }
+            // Debug mode toggle
+            if (keysPressed.has('keyg')) {
+                debugMode = !debugMode;
+                console.log(`${debugMode ? '🔧 DEBUG MODE ENABLED' : '🔧 DEBUG MODE DISABLED'}`);
+                if (debugMode) {
+                    console.log('Debug features:');
+                    console.log('- Red wireframes show wall boundaries');
+                    console.log('- Colored spheres show collision points');
+                    console.log('- Console logs show collision detection details');
+                    console.log('- Press G again to disable debug mode');
+                    // Reset debug tracking
+                    window.lastDebugPosition = null;
+                    // Recreate debug visualization
+                    createDebugSpheres();
+                }
+                else {
+                    // Reset debug tracking
+                    window.lastDebugPosition = null;
+                    // Clear debug visualization
+                    createDebugSpheres();
+                }
+                // Remove debug mode key from pressed keys to prevent continuous toggling
+                keysPressed.delete('keyg');
+            }
+            // Mouse look rotation (if pointer is locked)
+            if (isPointerLocked) {
+                player.angle += mouseX * 0.002;
+                mouseX = 0; // Reset mouse movement
+            }
             // Check collision and update position
             if (isValidPosition(newX, newY)) {
                 player.x = newX;
                 player.y = newY;
+            }
+            else {
+                // Try to slide along walls if direct movement is blocked
+                trySlideAlongWalls(newX, newY);
             }
             // Update camera position
             camera.position.set(player.x, 1, player.y);
             const lookX = player.x + Math.cos(player.angle) * 2;
             const lookZ = player.y + Math.sin(player.angle) * 2;
             camera.lookAt(lookX, 1, lookZ);
+            // Update player torch position
+            if (scene.playerTorch) {
+                scene.playerTorch.position.set(player.x, 1.5, player.y);
+            }
         }
         function isValidPosition(x, y) {
-            const tileX = Math.floor(x);
-            const tileY = Math.floor(y);
-            if (tileX < 0 || tileX >= currentGameMap[0].length ||
-                tileY < 0 || tileY >= currentGameMap.length) {
+            // Debug logging for collision detection calls (only for first call per frame to reduce spam)
+            if (debugMode && (!window.lastDebugPosition || window.lastDebugPosition !== `${x.toFixed(3)},${y.toFixed(3)}`)) {
+                console.log(`🔍 Checking position: (${x.toFixed(3)}, ${y.toFixed(3)})`);
+                console.log(`   Player collision radius: ${PLAYER_COLLISION_RADIUS}`);
+                window.lastDebugPosition = `${x.toFixed(3)},${y.toFixed(3)}`;
+            }
+            // Check bounds first with a small buffer
+            const buffer = 0.05;
+            if (x < buffer || x >= currentGameMap[0].length - buffer ||
+                y < buffer || y >= currentGameMap.length - buffer) {
+                if (debugMode) {
+                    console.log(`❌ OUT OF BOUNDS: Position (${x.toFixed(3)}, ${y.toFixed(3)}) outside map bounds`);
+                }
                 return false;
             }
-            const element = currentGameMap[tileY][tileX];
-            const properties = colorMapping_2.getElementProperties(element);
-            return properties.walkable;
+            // Use comprehensive collision points for reliable wall detection
+            // Points are arranged in a circle plus diagonals for better coverage
+            const collisionPoints = [
+                { x: x, y: y, name: 'Center' }, // Center
+                { x: x + PLAYER_COLLISION_RADIUS * 0.7, y: y, name: 'Right' },
+                { x: x - PLAYER_COLLISION_RADIUS * 0.7, y: y, name: 'Left' },
+                { x: x, y: y + PLAYER_COLLISION_RADIUS * 0.7, name: 'Front' },
+                { x: x, y: y - PLAYER_COLLISION_RADIUS * 0.7, name: 'Back' },
+                { x: x + PLAYER_COLLISION_RADIUS * 0.5, y: y + PLAYER_COLLISION_RADIUS * 0.5, name: 'Front-Right' },
+                { x: x - PLAYER_COLLISION_RADIUS * 0.5, y: y + PLAYER_COLLISION_RADIUS * 0.5, name: 'Front-Left' },
+                { x: x + PLAYER_COLLISION_RADIUS * 0.5, y: y - PLAYER_COLLISION_RADIUS * 0.5, name: 'Back-Right' },
+                { x: x - PLAYER_COLLISION_RADIUS * 0.5, y: y - PLAYER_COLLISION_RADIUS * 0.5, name: 'Back-Left' },
+            ];
+            // Debug: Log collision points
+            if (debugMode && (!window.lastDebugPosition || window.lastDebugPosition !== `${x.toFixed(3)},${y.toFixed(3)}`)) {
+                console.log('   Collision points:');
+                collisionPoints.forEach((point, index) => {
+                    console.log(`     ${point.name}: (${point.x.toFixed(3)}, ${point.y.toFixed(3)})`);
+                });
+            }
+            // Check all collision points
+            for (const point of collisionPoints) {
+                // Get the grid cell this point is in
+                const gridX = Math.floor(point.x);
+                const gridY = Math.floor(point.y);
+                // Check the current cell and all 8 adjacent cells
+                // This ensures we catch walls even when the player is near cell boundaries
+                const cellsToCheck = [
+                    { x: gridX, y: gridY }, // Current cell
+                    { x: gridX + 1, y: gridY }, // Right
+                    { x: gridX - 1, y: gridY }, // Left
+                    { x: gridX, y: gridY + 1 }, // Front
+                    { x: gridX, y: gridY - 1 }, // Back
+                    { x: gridX + 1, y: gridY + 1 }, // Front-Right
+                    { x: gridX + 1, y: gridY - 1 }, // Back-Right
+                    { x: gridX - 1, y: gridY + 1 }, // Front-Left
+                    { x: gridX - 1, y: gridY - 1 }, // Back-Left
+                ];
+                // Filter to valid grid cells only
+                const validCells = cellsToCheck.filter(cell => cell.x >= 0 && cell.x < currentGameMap[0].length &&
+                    cell.y >= 0 && cell.y < currentGameMap.length);
+                // Check each valid cell for walls
+                for (const cell of validCells) {
+                    const element = currentGameMap[cell.y][cell.x];
+                    const properties = colorMapping_2.getElementProperties(element);
+                    if (!properties.walkable) {
+                        // Check if the collision point is within this wall's 3D bounding box
+                        // Wall occupies: [cell.x - 0.5, cell.x + 0.5] x [0, WALL_HEIGHT] x [cell.y - 0.5, cell.y + 0.5]
+                        const wallMinX = cell.x - 0.5;
+                        const wallMaxX = cell.x + 0.5;
+                        const wallMinY = cell.y - 0.5;
+                        const wallMaxY = cell.y + 0.5;
+                        // Use strict inequalities to avoid edge case issues
+                        // Allow a tiny tolerance for floating point precision
+                        const tolerance = 0.001;
+                        if (point.x > wallMinX + tolerance && point.x < wallMaxX - tolerance &&
+                            point.y > wallMinY + tolerance && point.y < wallMaxY - tolerance) {
+                            // Debug logging for collision detection
+                            if (debugMode) {
+                                console.log(`🔴 COLLISION: ${point.name} point (${point.x.toFixed(3)}, ${point.y.toFixed(3)}) inside wall at cell (${cell.x}, ${cell.y})`);
+                                console.log(`   Wall bounds: X[${wallMinX.toFixed(3)}, ${wallMaxX.toFixed(3)}] Y[${wallMinY.toFixed(3)}, ${wallMaxY.toFixed(3)}]`);
+                                console.log(`   Player position: (${player.x.toFixed(3)}, ${player.y.toFixed(3)})`);
+                                console.log(`   Distance from player: dx=${(point.x - player.x).toFixed(3)}, dy=${(point.y - player.y).toFixed(3)}`);
+                            }
+                            return false;
+                        }
+                    }
+                }
+            }
+            // Debug logging for successful position validation
+            if (debugMode) {
+                console.log(`✅ POSITION VALID: (${x.toFixed(3)}, ${y.toFixed(3)})`);
+            }
+            return true;
+        }
+        function trySlideAlongWalls(targetX, targetY) {
+            const currentX = player.x;
+            const currentY = player.y;
+            // Calculate movement vector and normalize it
+            const deltaX = targetX - currentX;
+            const deltaY = targetY - currentY;
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            if (distance === 0)
+                return; // No movement attempted
+            const normalizedDeltaX = deltaX / distance;
+            const normalizedDeltaY = deltaY / distance;
+            // Maximum distance to attempt sliding
+            const maxSlideDistance = PLAYER_COLLISION_RADIUS * 0.8;
+            const slideStep = 0.03; // Smaller step for finer control
+            if (debugMode) {
+                console.log(`🎯 Attempting to slide from (${currentX.toFixed(3)}, ${currentY.toFixed(3)}) towards (${targetX.toFixed(3)}, ${targetY.toFixed(3)})`);
+                console.log(`   Movement vector: (${deltaX.toFixed(3)}, ${deltaY.toFixed(3)}) distance: ${distance.toFixed(3)}`);
+            }
+            // Try sliding perpendicular to the movement direction
+            // This creates a "sliding" effect along walls
+            const perpendicularX = -normalizedDeltaY;
+            const perpendicularY = normalizedDeltaX;
+            // Try both directions perpendicular to movement
+            const slideDirections = [
+                { x: perpendicularX, y: perpendicularY, name: 'Perpendicular +' },
+                { x: -perpendicularX, y: -perpendicularY, name: 'Perpendicular -' },
+                { x: normalizedDeltaX * 0.5, y: normalizedDeltaY * 0.5, name: 'Forward Half' },
+                { x: perpendicularX * 0.7, y: perpendicularY * 0.7, name: 'Perp 70%' },
+                { x: -perpendicularX * 0.7, y: -perpendicularY * 0.7, name: 'Perp -70%' },
+            ];
+            // First try smaller slides for smoother movement
+            for (let slideDist = slideStep; slideDist <= maxSlideDistance; slideDist += slideStep) {
+                for (const dir of slideDirections) {
+                    const testX = currentX + dir.x * slideDist;
+                    const testY = currentY + dir.y * slideDist;
+                    if (isValidPosition(testX, testY)) {
+                        player.x = testX;
+                        player.y = testY;
+                        if (debugMode) {
+                            console.log(`✅ SLID ${dir.name}: distance ${slideDist.toFixed(3)} to (${testX.toFixed(3)}, ${testY.toFixed(3)})`);
+                        }
+                        return;
+                    }
+                }
+            }
+            // If perpendicular sliding fails, try moving directly towards the target in smaller increments
+            // This handles cases where we're trying to move into a corner or tight space
+            const directSlideDirections = [
+                { x: normalizedDeltaX, y: normalizedDeltaY, name: 'Direct' },
+                { x: normalizedDeltaX * 0.3, y: normalizedDeltaY * 0.3, name: 'Direct 30%' },
+                { x: normalizedDeltaX * 0.1, y: normalizedDeltaY * 0.1, name: 'Direct 10%' },
+            ];
+            for (let slideDist = slideStep; slideDist <= maxSlideDistance * 0.5; slideDist += slideStep) {
+                for (const dir of directSlideDirections) {
+                    const testX = currentX + dir.x * slideDist;
+                    const testY = currentY + dir.y * slideDist;
+                    if (isValidPosition(testX, testY)) {
+                        player.x = testX;
+                        player.y = testY;
+                        if (debugMode) {
+                            console.log(`✅ SLID ${dir.name}: distance ${slideDist.toFixed(3)} to (${testX.toFixed(3)}, ${testY.toFixed(3)})`);
+                        }
+                        return;
+                    }
+                }
+            }
+            // Last resort: try very small movements in cardinal directions
+            const cardinalDirections = [
+                { x: slideStep, y: 0, name: '→' },
+                { x: -slideStep, y: 0, name: '←' },
+                { x: 0, y: slideStep, name: '↑' },
+                { x: 0, y: -slideStep, name: '↓' },
+            ];
+            for (const dir of cardinalDirections) {
+                const testX = currentX + dir.x;
+                const testY = currentY + dir.y;
+                if (isValidPosition(testX, testY)) {
+                    player.x = testX;
+                    player.y = testY;
+                    if (debugMode) {
+                        console.log(`✅ MICRO-SLID ${dir.name}: to (${testX.toFixed(3)}, ${testY.toFixed(3)})`);
+                    }
+                    return;
+                }
+            }
+            // If all sliding attempts fail, stay put
+            if (debugMode) {
+                console.log(`❌ CANNOT SLIDE: No valid positions found near (${currentX.toFixed(3)}, ${currentY.toFixed(3)})`);
+                console.log(`   Target was: (${targetX.toFixed(3)}, ${targetY.toFixed(3)})`);
+            }
+        }
+        function createDebugSpheres() {
+            // Clear existing debug spheres
+            debugSpheres.forEach(sphere => scene.remove(sphere));
+            debugSpheres = [];
+            // Clear existing wireframes when recreating debug spheres
+            scene.children.forEach(child => {
+                if (child.name && child.name.startsWith('wireframe_')) {
+                    scene.remove(child);
+                }
+            });
+            // Create debug spheres for collision points (9 points now)
+            const sphereGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+            for (let i = 0; i < 9; i++) {
+                const sphereMaterial = new THREE.MeshBasicMaterial({
+                    color: i === 0 ? 0x00ff00 : i < 5 ? 0xff0000 : 0xffa500, // Green for center, red for cardinal, orange for diagonal
+                    transparent: true,
+                    opacity: 0.7
+                });
+                const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+                sphere.visible = false; // Hidden by default
+                scene.add(sphere);
+                debugSpheres.push(sphere);
+            }
+            // Recreate wireframes for all walls if in debug mode
+            if (debugMode) {
+                for (let y = 0; y < currentGameMap.length; y++) {
+                    for (let x = 0; x < currentGameMap[y].length; x++) {
+                        const element = currentGameMap[y][x];
+                        const properties = colorMapping_2.getElementProperties(element);
+                        if (!properties.walkable) {
+                            // Recreate wireframe for this wall
+                            const wireframeGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
+                            const wireframeMaterial = new THREE.MeshBasicMaterial({
+                                color: 0xff0000,
+                                wireframe: true,
+                                transparent: true,
+                                opacity: 0.3
+                            });
+                            const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
+                            wireframe.position.set(x, WALL_HEIGHT / 2, y);
+                            wireframe.name = `wireframe_${x}_${y}`;
+                            scene.add(wireframe);
+                        }
+                    }
+                }
+            }
+        }
+        function updateDebugVisualization() {
+            if (!debugMode || debugSpheres.length === 0) {
+                debugSpheres.forEach(sphere => sphere.visible = false);
+                return;
+            }
+            // Show collision points around player (9 points)
+            const collisionPoints = [
+                { x: player.x, y: player.y }, // Center
+                { x: player.x + PLAYER_COLLISION_RADIUS * 0.7, y: player.y }, // Right
+                { x: player.x - PLAYER_COLLISION_RADIUS * 0.7, y: player.y }, // Left
+                { x: player.x, y: player.y + PLAYER_COLLISION_RADIUS * 0.7 }, // Front
+                { x: player.x, y: player.y - PLAYER_COLLISION_RADIUS * 0.7 }, // Back
+                { x: player.x + PLAYER_COLLISION_RADIUS * 0.5, y: player.y + PLAYER_COLLISION_RADIUS * 0.5 }, // Front-Right
+                { x: player.x - PLAYER_COLLISION_RADIUS * 0.5, y: player.y + PLAYER_COLLISION_RADIUS * 0.5 }, // Front-Left
+                { x: player.x + PLAYER_COLLISION_RADIUS * 0.5, y: player.y - PLAYER_COLLISION_RADIUS * 0.5 }, // Back-Right
+                { x: player.x - PLAYER_COLLISION_RADIUS * 0.5, y: player.y - PLAYER_COLLISION_RADIUS * 0.5 }, // Back-Left
+            ];
+            collisionPoints.forEach((point, index) => {
+                if (debugSpheres[index]) {
+                    debugSpheres[index].position.set(point.x, 1.2, point.y);
+                    debugSpheres[index].visible = true;
+                    // Color based on collision status
+                    const tileX = Math.floor(point.x);
+                    const tileY = Math.floor(point.y);
+                    if (tileX >= 0 && tileX < currentGameMap[0].length &&
+                        tileY >= 0 && tileY < currentGameMap.length) {
+                        const element = currentGameMap[tileY][tileX];
+                        const properties = colorMapping_2.getElementProperties(element);
+                        const material = debugSpheres[index].material;
+                        material.color.setHex(properties.walkable ? 0x00ff00 : 0xff0000);
+                    }
+                }
+            });
         }
         function gameLoop() {
             if (!gameRunning)
                 return;
             updatePlayer();
+            updateDebugVisualization();
             renderer.render(scene, camera);
             animationId = requestAnimationFrame(gameLoop);
         }
@@ -2343,9 +2711,28 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         function handleKeyUp(e) {
             keysPressed.delete(e.code.toLowerCase());
         }
-        // Event listeners
-        document.addEventListener('keydown', handleKeyDown);
-        document.addEventListener('keyup', handleKeyUp);
+        // Mouse event handlers
+        function handleMouseMove(e) {
+            if (isPointerLocked) {
+                mouseX += e.movementX;
+            }
+        }
+        function handlePointerLockChange() {
+            isPointerLocked = (document.pointerLockElement === renderer.domElement);
+        }
+        function handleClick() {
+            if (!isPointerLocked) {
+                renderer.domElement.requestPointerLock();
+            }
+        }
+        function setupInputListeners() {
+            // Event listeners
+            document.addEventListener('keydown', handleKeyDown);
+            document.addEventListener('keyup', handleKeyUp);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('pointerlockchange', handlePointerLockChange);
+            renderer.domElement.addEventListener('click', handleClick);
+        }
         return component;
     }
     exports_20("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
@@ -2359,14 +2746,180 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "colorMapping"], function (exports_21, context_21) {
+System.register("components/imageUploader", ["getImageData", "util", "components/common"], function (exports_21, context_21) {
     "use strict";
-    var run_1, util_6, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, colorMapping_3, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, inputContainer, presetPicker, drawingCanvas, imageEditor, dungeonCrawler, mainElem;
+    var getImageData_2, util_6, common_5;
     var __moduleName = context_21 && context_21.id;
+    function createImageUploader() {
+        const component = {
+            domElement: Object.assign(document.createElement("div"), { className: "imageUploaderComponent" }),
+            getCurrentImage: () => currentImageData,
+            clear: () => {
+                // Clear the file input
+                fileInput.value = '';
+                // Clear the preview
+                previewImage.src = '';
+                previewImage.style.display = 'none';
+                // Clear stored image data
+                currentImageData = null;
+                // Disable the use button
+                useImageButton.disabled = true;
+                // Clear any status message
+                statusMessage.textContent = '';
+                statusMessage.style.display = 'none';
+            }
+        };
+        // Current uploaded image data
+        let currentImageData = null;
+        // Create UI elements
+        const fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.accept = "image/*";
+        fileInput.style.marginBottom = "10px";
+        const previewImage = document.createElement("img");
+        previewImage.className = "uploadPreview";
+        previewImage.style.display = "none";
+        previewImage.style.maxWidth = "300px";
+        previewImage.style.maxHeight = "300px";
+        previewImage.style.border = "1px solid #ccc";
+        previewImage.style.marginTop = "10px";
+        const statusMessage = document.createElement("p");
+        statusMessage.style.display = "none";
+        statusMessage.style.marginTop = "10px";
+        statusMessage.style.padding = "8px";
+        statusMessage.style.borderRadius = "4px";
+        const useImageButton = document.createElement("input");
+        useImageButton.type = "button";
+        useImageButton.value = "Use This Map";
+        useImageButton.disabled = true;
+        useImageButton.style.marginTop = "10px";
+        useImageButton.onclick = () => {
+            if (currentImageData && component.onUploadComplete) {
+                component.onUploadComplete(currentImageData);
+            }
+        };
+        const clearButton = document.createElement("input");
+        clearButton.type = "button";
+        clearButton.value = "Clear";
+        clearButton.style.marginTop = "10px";
+        clearButton.onclick = component.clear;
+        // File input change handler
+        fileInput.onchange = async () => {
+            if (!fileInput.files || fileInput.files.length === 0) {
+                return;
+            }
+            const file = fileInput.files[0];
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                showStatusMessage('Please select a valid image file.', 'error');
+                return;
+            }
+            // Validate file size (max 10MB)
+            const maxSize = 10 * 1024 * 1024; // 10MB
+            if (file.size > maxSize) {
+                showStatusMessage('File size too large. Please select an image smaller than 10MB.', 'error');
+                return;
+            }
+            try {
+                showStatusMessage('Processing image...', 'info');
+                // Create object URL for preview
+                const objectUrl = URL.createObjectURL(file);
+                // Load image data using existing utility
+                const imageData = await getImageData_2.default(objectUrl);
+                // Check dimensions (reasonable limits for dungeon maps)
+                const maxDimension = 256;
+                if (imageData.width > maxDimension || imageData.height > maxDimension) {
+                    showStatusMessage(`Image dimensions too large. Please use an image no larger than ${maxDimension}x${maxDimension} pixels.`, 'error');
+                    URL.revokeObjectURL(objectUrl);
+                    return;
+                }
+                // Success - store image data and update UI
+                currentImageData = imageData;
+                previewImage.src = objectUrl;
+                previewImage.style.display = '';
+                useImageButton.disabled = false;
+                showStatusMessage(`Image loaded successfully: ${imageData.width}x${imageData.height} pixels`, 'success');
+                // Clean up object URL after image loads
+                previewImage.onload = () => {
+                    URL.revokeObjectURL(objectUrl);
+                };
+            }
+            catch (error) {
+                console.error('Error loading image:', error);
+                showStatusMessage('Error loading image. Please try a different file.', 'error');
+            }
+        };
+        function showStatusMessage(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.style.display = 'block';
+            // Remove existing classes
+            statusMessage.classList.remove('status-success', 'status-error', 'status-info');
+            // Add appropriate class for styling
+            statusMessage.classList.add(`status-${type}`);
+            // Style based on type
+            switch (type) {
+                case 'success':
+                    statusMessage.style.backgroundColor = '#d4edda';
+                    statusMessage.style.color = '#155724';
+                    statusMessage.style.border = '1px solid #c3e6cb';
+                    break;
+                case 'error':
+                    statusMessage.style.backgroundColor = '#f8d7da';
+                    statusMessage.style.color = '#721c24';
+                    statusMessage.style.border = '1px solid #f5c6cb';
+                    break;
+                case 'info':
+                    statusMessage.style.backgroundColor = '#d1ecf1';
+                    statusMessage.style.color = '#0c5460';
+                    statusMessage.style.border = '1px solid #bee5eb';
+                    break;
+            }
+        }
+        // Build the component DOM
+        util_6.buildDomTree(component.domElement, [
+            document.createElement("p"), [
+                "Upload an existing map image to use directly as a dungeon. The image should be a simple pixel art map with distinct colors representing different terrain types."
+            ],
+            common_5.inputGroup(), [
+                document.createElement("label"), [
+                    "Select Image File: ", fileInput
+                ]
+            ],
+            statusMessage,
+            previewImage,
+            common_5.inputGroup(), [
+                useImageButton,
+                clearButton
+            ]
+        ]);
+        return component;
+    }
+    exports_21("createImageUploader", createImageUploader);
+    return {
+        setters: [
+            function (getImageData_2_1) {
+                getImageData_2 = getImageData_2_1;
+            },
+            function (util_6_1) {
+                util_6 = util_6_1;
+            },
+            function (common_5_1) {
+                common_5 = common_5_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "colorMapping"], function (exports_22, context_22) {
+    "use strict";
+    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, colorMapping_3, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
+    var __moduleName = context_22 && context_22.id;
     // Tab switching logic for input tabs
-    function switchInputTab(activeTab, inactiveTab, showElement) {
+    function switchInputTab(activeTab, inactiveTabs, showElement) {
+        // Remove active class from all tabs
+        inactiveTabs.forEach(tab => tab.classList.remove("active"));
         activeTab.classList.add("active");
-        inactiveTab.classList.remove("active");
         // Clear and add the correct input method
         inputContainer.innerHTML = "";
         inputContainer.appendChild(showElement);
@@ -2401,11 +2954,12 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         }
     }
     function buildInputMode() {
-        util_6.buildDomTree(contentContainer, [
+        util_7.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Input bitmap"],
             inputTabContainer, [
                 presetTab,
                 drawTab,
+                uploadTab,
             ],
             inputContainer,
             document.createElement("h2"), ["Options"],
@@ -2437,7 +2991,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         editImageButton.onclick = () => {
             switchMode(AppMode.IMAGE_EDITING);
         };
-        util_6.buildDomTree(contentContainer, [
+        util_7.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Wave Function Collapse Generation"],
             document.createElement("div"), [
                 restartWfc,
@@ -2451,7 +3005,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         if (generatedImageData) {
             imageEditor.loadImage(generatedImageData);
         }
-        util_6.buildDomTree(contentContainer, [
+        util_7.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Edit Generated Image"],
             document.createElement("p"), [
                 "Use the drawing tools to add player start (dark green) and finish (dark red) points, polish routes, and adjust the dungeon layout."
@@ -2460,7 +3014,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         ]);
     }
     function buildDungeonCrawlerMode() {
-        util_6.buildDomTree(contentContainer, [
+        util_7.buildDomTree(contentContainer, [
             document.createElement("h2"), ["Dungeon Crawler Game"],
             dungeonCrawler.domElement,
         ]);
@@ -2497,8 +3051,8 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             function (run_1_1) {
                 run_1 = run_1_1;
             },
-            function (util_6_1) {
-                util_6 = util_6_1;
+            function (util_7_1) {
+                util_7 = util_7_1;
             },
             function (wfcOptions_1_1) {
                 wfcOptions_1 = wfcOptions_1_1;
@@ -2514,6 +3068,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             },
             function (threeJSDungeonCrawler_1_1) {
                 threeJSDungeonCrawler_1 = threeJSDungeonCrawler_1_1;
+            },
+            function (imageUploader_1_1) {
+                imageUploader_1 = imageUploader_1_1;
             },
             function (colorMapping_3_1) {
                 colorMapping_3 = colorMapping_3_1;
@@ -2585,6 +3142,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             drawTab = document.createElement("button");
             drawTab.textContent = "Draw Custom";
             drawTab.className = "tab";
+            uploadTab = document.createElement("button");
+            uploadTab.textContent = "Upload Map";
+            uploadTab.className = "tab";
             inputContainer = document.createElement("div");
             inputContainer.className = "inputContainer";
             // Preset picker
@@ -2603,6 +3163,31 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                 switchMode(AppMode.WFC_GENERATION);
                 startWFC();
             };
+            // Image uploader for direct map upload
+            imageUploader = imageUploader_1.createImageUploader();
+            imageUploader.onUploadComplete = (image) => {
+                // Store the uploaded image as generated image data
+                generatedImageData = image;
+                // Check if the uploaded map has required start/finish points
+                const tempGameMap = colorMapping_3.imageDataToGameMap(image);
+                const playerStart = colorMapping_3.findPlayerStart(tempGameMap);
+                const playerFinish = colorMapping_3.findPlayerFinish(tempGameMap);
+                if (!playerStart || !playerFinish) {
+                    // Missing start or finish points - go to image editor first
+                    const missingElements = [];
+                    if (!playerStart)
+                        missingElements.push("player start (dark green)");
+                    if (!playerFinish)
+                        missingElements.push("player finish (dark red)");
+                    alert(`Your uploaded map is missing required elements: ${missingElements.join(" and ")}. Please use the image editor to add them before playing.`);
+                    switchMode(AppMode.IMAGE_EDITING);
+                }
+                else {
+                    // Map is complete - go directly to dungeon crawler
+                    switchMode(AppMode.DUNGEON_CRAWLER);
+                    startDungeonCrawler();
+                }
+            };
             // Image editor
             imageEditor = imageEditor_1.createImageEditor();
             imageEditor.onEditComplete = (image) => {
@@ -2620,8 +3205,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                 alert("Game Over! You died in the dungeon.");
                 switchMode(AppMode.INPUT);
             };
-            presetTab.onclick = () => switchInputTab(presetTab, drawTab, presetPicker.domElement);
-            drawTab.onclick = () => switchInputTab(drawTab, presetTab, drawingCanvas.domElement);
+            presetTab.onclick = () => switchInputTab(presetTab, [drawTab, uploadTab], presetPicker.domElement);
+            drawTab.onclick = () => switchInputTab(drawTab, [presetTab, uploadTab], drawingCanvas.domElement);
+            uploadTab.onclick = () => switchInputTab(uploadTab, [presetTab, drawTab], imageUploader.domElement);
             // Mode tab event listeners
             inputModeTab.onclick = () => switchMode(AppMode.INPUT);
             wfcModeTab.onclick = () => switchMode(AppMode.WFC_GENERATION);
@@ -2630,7 +3216,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             // Initialize the application
             mainElem = document.querySelector("main");
             if (mainElem) {
-                const content = util_6.buildDomTree(mainElem, [
+                const content = util_7.buildDomTree(mainElem, [
                     document.createElement("h2"), ["Wave Function Collapse Dungeon Generator"],
                     modeTabContainer, [
                         inputModeTab,
