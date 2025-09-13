@@ -17,6 +17,7 @@ export interface IWfcOptions {
 
 export interface IWaveFunctionCollapse {
   stop(): void;
+  onComplete?: () => void;
 }
 
 const targetFps = 45;
@@ -26,6 +27,7 @@ export function createWaveFunctionCollapse(
   image: ImageData,
   canvas: HTMLCanvasElement,
   { periodicInput, periodicOutput, outputWidth, outputHeight, N, symmetry, ground }: IWfcOptions,
+  onComplete?: () => void,
 ): IWaveFunctionCollapse {
 
   const model = createOverlappingModel(image, { N, symmetry, periodicInput });
@@ -62,6 +64,10 @@ export function createWaveFunctionCollapse(
       } else if (result === false)  {
         clear();
       } else {
+        // Generation completed successfully
+        if (onComplete) {
+          onComplete();
+        }
         return;
       }
     } else {
@@ -70,6 +76,10 @@ export function createWaveFunctionCollapse(
         const waveIndex = propagate(model, superpos);
         if (waveIndex === null) {
           propagating = false;
+          // Generation completed via propagation
+          if (onComplete) {
+            onComplete();
+          }
         } else {
           render(waveIndex);
         }

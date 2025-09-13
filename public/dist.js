@@ -427,7 +427,7 @@ System.register("wfc/run", ["wfc/superposition", "wfc/overlappingModel", "wfc/se
     "use strict";
     var superposition_1, overlappingModel_1, setGround_1, observe_1, propagate_1, render_1, targetFps, targetTime;
     var __moduleName = context_7 && context_7.id;
-    function createWaveFunctionCollapse(image, canvas, { periodicInput, periodicOutput, outputWidth, outputHeight, N, symmetry, ground }) {
+    function createWaveFunctionCollapse(image, canvas, { periodicInput, periodicOutput, outputWidth, outputHeight, N, symmetry, ground }, onComplete) {
         const model = overlappingModel_1.createOverlappingModel(image, { N, symmetry, periodicInput });
         const superpos = superposition_1.createSuperposition(model.numCoefficients, { width: outputWidth, height: outputHeight, periodic: periodicOutput });
         const observe = observe_1.createObservation(model, superpos);
@@ -454,6 +454,10 @@ System.register("wfc/run", ["wfc/superposition", "wfc/overlappingModel", "wfc/se
                     clear();
                 }
                 else {
+                    // Generation completed successfully
+                    if (onComplete) {
+                        onComplete();
+                    }
                     return;
                 }
             }
@@ -463,6 +467,10 @@ System.register("wfc/run", ["wfc/superposition", "wfc/overlappingModel", "wfc/se
                     const waveIndex = propagate_1.propagate(model, superpos);
                     if (waveIndex === null) {
                         propagating = false;
+                        // Generation completed via propagation
+                        if (onComplete) {
+                            onComplete();
+                        }
                     }
                     else {
                         render(waveIndex);
@@ -994,23 +1002,360 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker"], function (exports_16, context_16) {
+System.register("components/drawingCanvas", ["util", "components/common"], function (exports_16, context_16) {
     "use strict";
-    var run_1, util_4, wfcOptions_1, presetPicker_1, wfc, canvas, wfcOptions, inputBitmap, start, presetPicker, restartWfc, mainElem;
+    var util_4, common_3;
     var __moduleName = context_16 && context_16.id;
+    function createDrawingCanvas() {
+        const component = {
+            domElement: Object.assign(document.createElement("div"), { className: "drawingCanvasComponent" }),
+            getImageData: () => {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                return imageData;
+            },
+            clear: () => {
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        };
+        // Drawing state
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentTool = 'pen';
+        let currentColor = '#000000';
+        let lineWidth = 2;
+        let startX = 0;
+        let startY = 0;
+        let canvasSize = 32;
+        let scaleFactor = 16; // Display scale - increased for better pixel visibility
+        // Create canvas
+        const canvas = document.createElement("canvas");
+        canvas.width = canvasSize;
+        canvas.height = canvasSize;
+        canvas.className = "drawingCanvas";
+        canvas.style.border = "1px solid #ccc";
+        canvas.style.cursor = "crosshair";
+        canvas.style.width = `${canvasSize * scaleFactor}px`;
+        canvas.style.height = `${canvasSize * scaleFactor}px`;
+        canvas.style.imageRendering = "pixelated";
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Canvas size selection
+        const sizeSelect = document.createElement("select");
+        sizeSelect.innerHTML = `
+    <option value="16">16x16</option>
+    <option value="32">32x32</option>
+    <option value="64">64x64</option>
+  `;
+        sizeSelect.value = canvasSize.toString();
+        sizeSelect.onchange = () => {
+            canvasSize = parseInt(sizeSelect.value);
+            updateCanvasSize();
+        };
+        // Tool selection
+        const toolSelect = document.createElement("select");
+        toolSelect.innerHTML = `
+    <option value="pen">Pen</option>
+    <option value="eraser">Eraser</option>
+    <option value="bucket">Paint Bucket</option>
+    <option value="rectangle">Rectangle</option>
+    <option value="circle">Circle</option>
+    <option value="line">Line</option>
+    <option value="spray">Spray</option>
+  `;
+        toolSelect.value = currentTool;
+        toolSelect.onchange = () => {
+            currentTool = toolSelect.value;
+            canvas.style.cursor = currentTool === 'eraser' ? 'not-allowed' :
+                currentTool === 'bucket' ? 'pointer' : 'crosshair';
+        };
+        // Color picker
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = currentColor;
+        colorInput.onchange = () => {
+            currentColor = colorInput.value;
+        };
+        // Line width slider
+        const widthLabel = document.createElement("label");
+        widthLabel.textContent = "Size: ";
+        const widthInput = document.createElement("input");
+        widthInput.type = "range";
+        widthInput.min = "1";
+        widthInput.max = "20";
+        widthInput.value = lineWidth.toString();
+        widthInput.oninput = () => {
+            lineWidth = parseInt(widthInput.value);
+        };
+        // Clear button
+        const clearButton = document.createElement("input");
+        clearButton.type = "button";
+        clearButton.value = "Clear Canvas";
+        clearButton.onclick = () => {
+            component.clear();
+        };
+        // Use drawing button
+        const useDrawingButton = document.createElement("input");
+        useDrawingButton.type = "button";
+        useDrawingButton.value = "Use This Drawing";
+        useDrawingButton.onclick = () => {
+            const imageData = component.getImageData();
+            if (imageData && component.onDrawComplete) {
+                component.onDrawComplete(imageData);
+            }
+        };
+        // Helper functions
+        function updateCanvasSize() {
+            canvas.width = canvasSize;
+            canvas.height = canvasSize;
+            canvas.style.width = `${canvasSize * scaleFactor}px`;
+            canvas.style.height = `${canvasSize * scaleFactor}px`;
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+        // Drawing functions
+        function startDrawing(e) {
+            isDrawing = true;
+            const coords = getCanvasCoordinates(e);
+            [lastX, lastY] = [coords.x, coords.y];
+            [startX, startY] = [coords.x, coords.y];
+            if ((currentTool === 'pen' || currentTool === 'eraser') && lineWidth === 1) {
+                // For pixel-perfect pen with size 1, draw immediately on click
+                ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+                ctx.fillRect(Math.floor(coords.x), Math.floor(coords.y), 1, 1);
+            }
+            else if (currentTool === 'pen' || currentTool === 'eraser') {
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+            }
+            else if (currentTool === 'bucket') {
+                // For bucket tool, fill immediately on click
+                floodFill(Math.floor(coords.x), Math.floor(coords.y), currentColor);
+                isDrawing = false;
+            }
+        }
+        function draw(e) {
+            if (!isDrawing)
+                return;
+            const coords = getCanvasCoordinates(e);
+            const x = coords.x;
+            const y = coords.y;
+            ctx.strokeStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+            switch (currentTool) {
+                case 'pen':
+                case 'eraser':
+                    if (lineWidth === 1) {
+                        // Pixel-perfect drawing for size 1 - only draw if moved to a different pixel
+                        const currentPixelX = Math.floor(x);
+                        const currentPixelY = Math.floor(y);
+                        const lastPixelX = Math.floor(lastX);
+                        const lastPixelY = Math.floor(lastY);
+                        if (currentPixelX !== lastPixelX || currentPixelY !== lastPixelY) {
+                            ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+                            ctx.fillRect(currentPixelX, currentPixelY, 1, 1);
+                        }
+                    }
+                    else {
+                        // Normal line drawing for larger sizes
+                        ctx.lineWidth = lineWidth;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.lineTo(x, y);
+                        ctx.stroke();
+                    }
+                    break;
+                case 'spray':
+                    sprayPaint(x, y);
+                    break;
+            }
+            [lastX, lastY] = [x, y];
+        }
+        function stopDrawing(e) {
+            if (!isDrawing)
+                return;
+            isDrawing = false;
+            const coords = getCanvasCoordinates(e);
+            const x = coords.x;
+            const y = coords.y;
+            switch (currentTool) {
+                case 'rectangle':
+                    drawRectangle(startX, startY, x, y);
+                    break;
+                case 'circle':
+                    drawCircle(startX, startY, x, y);
+                    break;
+                case 'line':
+                    drawLine(startX, startY, x, y);
+                    break;
+            }
+        }
+        function sprayPaint(x, y) {
+            const density = 50;
+            const radius = lineWidth * 2;
+            for (let i = 0; i < density; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * radius;
+                const sprayX = x + Math.cos(angle) * distance;
+                const sprayY = y + Math.sin(angle) * distance;
+                ctx.fillStyle = currentColor;
+                ctx.beginPath();
+                ctx.arc(sprayX, sprayY, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        function drawRectangle(x1, y1, x2, y2) {
+            const width = x2 - x1;
+            const height = y2 - y1;
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.strokeRect(x1, y1, width, height);
+        }
+        function drawCircle(x1, y1, x2, y2) {
+            const radius = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.arc(x1, y1, radius, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        function drawLine(x1, y1, x2, y2) {
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+        function floodFill(startX, startY, fillColor) {
+            // Get the image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            // Convert fill color to RGB
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.fillStyle = fillColor;
+            tempCtx.fillRect(0, 0, 1, 1);
+            const fillData = tempCtx.getImageData(0, 0, 1, 1).data;
+            const fillR = fillData[0];
+            const fillG = fillData[1];
+            const fillB = fillData[2];
+            // Get the color we're replacing
+            const startIndex = (startY * canvas.width + startX) * 4;
+            const targetR = data[startIndex];
+            const targetG = data[startIndex + 1];
+            const targetB = data[startIndex + 2];
+            // Don't fill if the target color is the same as fill color
+            if (targetR === fillR && targetG === fillG && targetB === fillB) {
+                return;
+            }
+            // Flood fill using stack-based approach
+            const stack = [[startX, startY]];
+            const visited = new Set();
+            while (stack.length > 0) {
+                const [x, y] = stack.pop();
+                const key = `${x},${y}`;
+                if (visited.has(key) || x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
+                    continue;
+                }
+                const index = (y * canvas.width + x) * 4;
+                const r = data[index];
+                const g = data[index + 1];
+                const b = data[index + 2];
+                // Check if this pixel matches the target color
+                if (r === targetR && g === targetG && b === targetB) {
+                    // Fill the pixel
+                    data[index] = fillR;
+                    data[index + 1] = fillG;
+                    data[index + 2] = fillB;
+                    data[index + 3] = 255; // Alpha
+                    visited.add(key);
+                    // Add adjacent pixels to stack
+                    stack.push([x + 1, y]);
+                    stack.push([x - 1, y]);
+                    stack.push([x, y + 1]);
+                    stack.push([x, y - 1]);
+                }
+            }
+            // Put the modified image data back
+            ctx.putImageData(imageData, 0, 0);
+        }
+        // Event listeners
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        // Build DOM
+        util_4.buildDomTree(component.domElement, [
+            document.createElement("p"), [
+                "Create a custom image for wave function collapse. Draw simple patterns with distinct colors."
+            ],
+            common_3.inputGroup(), [
+                document.createElement("label"), ["Canvas Size: ", sizeSelect],
+                document.createElement("label"), ["Tool: ", toolSelect],
+                document.createElement("label"), ["Color: ", colorInput],
+                widthLabel, widthInput,
+            ],
+            common_3.inputGroup(), [
+                clearButton,
+                useDrawingButton,
+            ],
+            canvas,
+        ]);
+        return component;
+    }
+    exports_16("createDrawingCanvas", createDrawingCanvas);
+    return {
+        setters: [
+            function (util_4_1) {
+                util_4 = util_4_1;
+            },
+            function (common_3_1) {
+                common_3 = common_3_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas"], function (exports_17, context_17) {
+    "use strict";
+    var run_1, util_5, wfcOptions_1, presetPicker_1, drawingCanvas_1, wfc, canvas, wfcOptions, inputBitmap, start, tabContainer, presetTab, drawTab, inputContainer, presetPicker, drawingCanvas, restartWfc, downloadButton, mainElem;
+    var __moduleName = context_17 && context_17.id;
+    // Tab switching logic
+    function switchTab(activeTab, inactiveTab, showElement) {
+        activeTab.classList.add("active");
+        inactiveTab.classList.remove("active");
+        // Clear and add the correct input method
+        inputContainer.innerHTML = "";
+        inputContainer.appendChild(showElement);
+    }
     return {
         setters: [
             function (run_1_1) {
                 run_1 = run_1_1;
             },
-            function (util_4_1) {
-                util_4 = util_4_1;
+            function (util_5_1) {
+                util_5 = util_5_1;
             },
             function (wfcOptions_1_1) {
                 wfcOptions_1 = wfcOptions_1_1;
             },
             function (presetPicker_1_1) {
                 presetPicker_1 = presetPicker_1_1;
+            },
+            function (drawingCanvas_1_1) {
+                drawingCanvas_1 = drawingCanvas_1_1;
             }
         ],
         execute: function () {
@@ -1026,28 +1371,72 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                 if (!inputBitmap) {
                     return;
                 }
-                wfc = run_1.createWaveFunctionCollapse(inputBitmap, canvas, wfcOptions.options);
+                // Disable download button while generating
+                downloadButton.disabled = true;
+                wfc = run_1.createWaveFunctionCollapse(inputBitmap, canvas, wfcOptions.options, () => {
+                    // Enable download button when generation completes
+                    downloadButton.disabled = false;
+                });
             };
+            // Create input method tabs
+            tabContainer = document.createElement("div");
+            tabContainer.className = "tabContainer";
+            presetTab = document.createElement("button");
+            presetTab.textContent = "Preset Images";
+            presetTab.className = "tab active";
+            drawTab = document.createElement("button");
+            drawTab.textContent = "Draw Custom";
+            drawTab.className = "tab";
+            inputContainer = document.createElement("div");
+            inputContainer.className = "inputContainer";
+            // Preset picker
             presetPicker = presetPicker_1.createPresetPicker();
             presetPicker.onPick = (image, options) => {
                 inputBitmap = image;
                 wfcOptions.updateOptions(options);
                 start();
             };
+            // Drawing canvas
+            drawingCanvas = drawingCanvas_1.createDrawingCanvas();
+            drawingCanvas.onDrawComplete = (image) => {
+                inputBitmap = image;
+                wfcOptions.updateOptions({}); // Reset to defaults for custom drawings
+                start();
+            };
+            presetTab.onclick = () => switchTab(presetTab, drawTab, presetPicker.domElement);
+            drawTab.onclick = () => switchTab(drawTab, presetTab, drawingCanvas.domElement);
+            // Initialize with preset picker
+            inputContainer.appendChild(presetPicker.domElement);
             restartWfc = document.createElement("input");
             restartWfc.type = "button";
             restartWfc.value = "Restart Generation";
             restartWfc.onclick = start;
+            downloadButton = document.createElement("input");
+            downloadButton.type = "button";
+            downloadButton.value = "Download PNG";
+            downloadButton.disabled = true;
+            downloadButton.onclick = () => {
+                // Create a link element to trigger download
+                const link = document.createElement("a");
+                link.download = `wfc-output-${Date.now()}.png`;
+                link.href = canvas.toDataURL("image/png");
+                link.click();
+            };
             mainElem = document.querySelector("main");
             if (mainElem) {
-                const content = util_4.buildDomTree(mainElem, [
+                const content = util_5.buildDomTree(mainElem, [
                     document.createElement("h2"), ["Input bitmap"],
-                    presetPicker.domElement,
+                    tabContainer, [
+                        presetTab,
+                        drawTab,
+                    ],
+                    inputContainer,
                     document.createElement("h2"), ["Options"],
                     wfcOptions.domElement,
                     document.createElement("h2"), ["Output"],
                     document.createElement("div"), [
                         restartWfc,
+                        downloadButton,
                     ],
                     canvas,
                 ]);
