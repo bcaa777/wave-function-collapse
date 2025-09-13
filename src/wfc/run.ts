@@ -1,4 +1,3 @@
-import { printPatterns } from "./debug";
 import { createSuperposition } from "./superposition";
 import { createOverlappingModel } from "./overlappingModel";
 import { setGround } from "./setGround";
