@@ -1002,336 +1002,10 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
         }
     };
 });
-System.register("components/drawingCanvas", ["util", "components/common"], function (exports_16, context_16) {
-    "use strict";
-    var util_4, common_3;
-    var __moduleName = context_16 && context_16.id;
-    function createDrawingCanvas() {
-        const component = {
-            domElement: Object.assign(document.createElement("div"), { className: "drawingCanvasComponent" }),
-            getImageData: () => {
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                return imageData;
-            },
-            clear: () => {
-                ctx.fillStyle = "#FFFFFF";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }
-        };
-        // Drawing state
-        let isDrawing = false;
-        let lastX = 0;
-        let lastY = 0;
-        let currentTool = 'pen';
-        let currentColor = '#000000';
-        let lineWidth = 2;
-        let startX = 0;
-        let startY = 0;
-        let canvasSize = 32;
-        let scaleFactor = 16; // Display scale - increased for better pixel visibility
-        // Create canvas
-        const canvas = document.createElement("canvas");
-        canvas.width = canvasSize;
-        canvas.height = canvasSize;
-        canvas.className = "drawingCanvas";
-        canvas.style.border = "1px solid #ccc";
-        canvas.style.cursor = "crosshair";
-        canvas.style.width = `${canvasSize * scaleFactor}px`;
-        canvas.style.height = `${canvasSize * scaleFactor}px`;
-        canvas.style.imageRendering = "pixelated";
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        // Canvas size selection
-        const sizeSelect = document.createElement("select");
-        sizeSelect.innerHTML = `
-    <option value="16">16x16</option>
-    <option value="32">32x32</option>
-    <option value="64">64x64</option>
-  `;
-        sizeSelect.value = canvasSize.toString();
-        sizeSelect.onchange = () => {
-            canvasSize = parseInt(sizeSelect.value);
-            updateCanvasSize();
-        };
-        // Tool selection
-        const toolSelect = document.createElement("select");
-        toolSelect.innerHTML = `
-    <option value="pen">Pen</option>
-    <option value="eraser">Eraser</option>
-    <option value="bucket">Paint Bucket</option>
-    <option value="rectangle">Rectangle</option>
-    <option value="circle">Circle</option>
-    <option value="line">Line</option>
-    <option value="spray">Spray</option>
-  `;
-        toolSelect.value = currentTool;
-        toolSelect.onchange = () => {
-            currentTool = toolSelect.value;
-            canvas.style.cursor = currentTool === 'eraser' ? 'not-allowed' :
-                currentTool === 'bucket' ? 'pointer' : 'crosshair';
-        };
-        // Color picker
-        const colorInput = document.createElement("input");
-        colorInput.type = "color";
-        colorInput.value = currentColor;
-        colorInput.onchange = () => {
-            currentColor = colorInput.value;
-        };
-        // Line width slider
-        const widthLabel = document.createElement("label");
-        widthLabel.textContent = "Size: ";
-        const widthInput = document.createElement("input");
-        widthInput.type = "range";
-        widthInput.min = "1";
-        widthInput.max = "20";
-        widthInput.value = lineWidth.toString();
-        widthInput.oninput = () => {
-            lineWidth = parseInt(widthInput.value);
-        };
-        // Clear button
-        const clearButton = document.createElement("input");
-        clearButton.type = "button";
-        clearButton.value = "Clear Canvas";
-        clearButton.onclick = () => {
-            component.clear();
-        };
-        // Use drawing button
-        const useDrawingButton = document.createElement("input");
-        useDrawingButton.type = "button";
-        useDrawingButton.value = "Use This Drawing";
-        useDrawingButton.onclick = () => {
-            const imageData = component.getImageData();
-            if (imageData && component.onDrawComplete) {
-                component.onDrawComplete(imageData);
-            }
-        };
-        // Helper functions
-        function updateCanvasSize() {
-            canvas.width = canvasSize;
-            canvas.height = canvasSize;
-            canvas.style.width = `${canvasSize * scaleFactor}px`;
-            canvas.style.height = `${canvasSize * scaleFactor}px`;
-            ctx.fillStyle = "#FFFFFF";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-        function getCanvasCoordinates(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            return {
-                x: (e.clientX - rect.left) * scaleX,
-                y: (e.clientY - rect.top) * scaleY
-            };
-        }
-        // Drawing functions
-        function startDrawing(e) {
-            isDrawing = true;
-            const coords = getCanvasCoordinates(e);
-            [lastX, lastY] = [coords.x, coords.y];
-            [startX, startY] = [coords.x, coords.y];
-            if ((currentTool === 'pen' || currentTool === 'eraser') && lineWidth === 1) {
-                // For pixel-perfect pen with size 1, draw immediately on click
-                ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
-                ctx.fillRect(Math.floor(coords.x), Math.floor(coords.y), 1, 1);
-            }
-            else if (currentTool === 'pen' || currentTool === 'eraser') {
-                ctx.beginPath();
-                ctx.moveTo(lastX, lastY);
-            }
-            else if (currentTool === 'bucket') {
-                // For bucket tool, fill immediately on click
-                floodFill(Math.floor(coords.x), Math.floor(coords.y), currentColor);
-                isDrawing = false;
-            }
-        }
-        function draw(e) {
-            if (!isDrawing)
-                return;
-            const coords = getCanvasCoordinates(e);
-            const x = coords.x;
-            const y = coords.y;
-            ctx.strokeStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
-            switch (currentTool) {
-                case 'pen':
-                case 'eraser':
-                    if (lineWidth === 1) {
-                        // Pixel-perfect drawing for size 1 - only draw if moved to a different pixel
-                        const currentPixelX = Math.floor(x);
-                        const currentPixelY = Math.floor(y);
-                        const lastPixelX = Math.floor(lastX);
-                        const lastPixelY = Math.floor(lastY);
-                        if (currentPixelX !== lastPixelX || currentPixelY !== lastPixelY) {
-                            ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
-                            ctx.fillRect(currentPixelX, currentPixelY, 1, 1);
-                        }
-                    }
-                    else {
-                        // Normal line drawing for larger sizes
-                        ctx.lineWidth = lineWidth;
-                        ctx.lineCap = 'round';
-                        ctx.lineJoin = 'round';
-                        ctx.lineTo(x, y);
-                        ctx.stroke();
-                    }
-                    break;
-                case 'spray':
-                    sprayPaint(x, y);
-                    break;
-            }
-            [lastX, lastY] = [x, y];
-        }
-        function stopDrawing(e) {
-            if (!isDrawing)
-                return;
-            isDrawing = false;
-            const coords = getCanvasCoordinates(e);
-            const x = coords.x;
-            const y = coords.y;
-            switch (currentTool) {
-                case 'rectangle':
-                    drawRectangle(startX, startY, x, y);
-                    break;
-                case 'circle':
-                    drawCircle(startX, startY, x, y);
-                    break;
-                case 'line':
-                    drawLine(startX, startY, x, y);
-                    break;
-            }
-        }
-        function sprayPaint(x, y) {
-            const density = 50;
-            const radius = lineWidth * 2;
-            for (let i = 0; i < density; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                const distance = Math.random() * radius;
-                const sprayX = x + Math.cos(angle) * distance;
-                const sprayY = y + Math.sin(angle) * distance;
-                ctx.fillStyle = currentColor;
-                ctx.beginPath();
-                ctx.arc(sprayX, sprayY, 1, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-        function drawRectangle(x1, y1, x2, y2) {
-            const width = x2 - x1;
-            const height = y2 - y1;
-            ctx.strokeStyle = currentColor;
-            ctx.lineWidth = lineWidth;
-            ctx.strokeRect(x1, y1, width, height);
-        }
-        function drawCircle(x1, y1, x2, y2) {
-            const radius = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-            ctx.strokeStyle = currentColor;
-            ctx.lineWidth = lineWidth;
-            ctx.beginPath();
-            ctx.arc(x1, y1, radius, 0, Math.PI * 2);
-            ctx.stroke();
-        }
-        function drawLine(x1, y1, x2, y2) {
-            ctx.strokeStyle = currentColor;
-            ctx.lineWidth = lineWidth;
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.stroke();
-        }
-        function floodFill(startX, startY, fillColor) {
-            // Get the image data
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            // Convert fill color to RGB
-            const tempCanvas = document.createElement('canvas');
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.fillStyle = fillColor;
-            tempCtx.fillRect(0, 0, 1, 1);
-            const fillData = tempCtx.getImageData(0, 0, 1, 1).data;
-            const fillR = fillData[0];
-            const fillG = fillData[1];
-            const fillB = fillData[2];
-            // Get the color we're replacing
-            const startIndex = (startY * canvas.width + startX) * 4;
-            const targetR = data[startIndex];
-            const targetG = data[startIndex + 1];
-            const targetB = data[startIndex + 2];
-            // Don't fill if the target color is the same as fill color
-            if (targetR === fillR && targetG === fillG && targetB === fillB) {
-                return;
-            }
-            // Flood fill using stack-based approach
-            const stack = [[startX, startY]];
-            const visited = new Set();
-            while (stack.length > 0) {
-                const [x, y] = stack.pop();
-                const key = `${x},${y}`;
-                if (visited.has(key) || x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
-                    continue;
-                }
-                const index = (y * canvas.width + x) * 4;
-                const r = data[index];
-                const g = data[index + 1];
-                const b = data[index + 2];
-                // Check if this pixel matches the target color
-                if (r === targetR && g === targetG && b === targetB) {
-                    // Fill the pixel
-                    data[index] = fillR;
-                    data[index + 1] = fillG;
-                    data[index + 2] = fillB;
-                    data[index + 3] = 255; // Alpha
-                    visited.add(key);
-                    // Add adjacent pixels to stack
-                    stack.push([x + 1, y]);
-                    stack.push([x - 1, y]);
-                    stack.push([x, y + 1]);
-                    stack.push([x, y - 1]);
-                }
-            }
-            // Put the modified image data back
-            ctx.putImageData(imageData, 0, 0);
-        }
-        // Event listeners
-        canvas.addEventListener('mousedown', startDrawing);
-        canvas.addEventListener('mousemove', draw);
-        canvas.addEventListener('mouseup', stopDrawing);
-        canvas.addEventListener('mouseout', stopDrawing);
-        // Build DOM
-        util_4.buildDomTree(component.domElement, [
-            document.createElement("p"), [
-                "Create a custom image for wave function collapse. Draw simple patterns with distinct colors."
-            ],
-            common_3.inputGroup(), [
-                document.createElement("label"), ["Canvas Size: ", sizeSelect],
-                document.createElement("label"), ["Tool: ", toolSelect],
-                document.createElement("label"), ["Color: ", colorInput],
-                widthLabel, widthInput,
-            ],
-            common_3.inputGroup(), [
-                clearButton,
-                useDrawingButton,
-            ],
-            canvas,
-        ]);
-        return component;
-    }
-    exports_16("createDrawingCanvas", createDrawingCanvas);
-    return {
-        setters: [
-            function (util_4_1) {
-                util_4 = util_4_1;
-            },
-            function (common_3_1) {
-                common_3 = common_3_1;
-            }
-        ],
-        execute: function () {
-        }
-    };
-});
-System.register("colorMapping", [], function (exports_17, context_17) {
+System.register("colorMapping", [], function (exports_16, context_16) {
     "use strict";
     var GameElement, DEFAULT_COLOR_MAPPINGS;
-    var __moduleName = context_17 && context_17.id;
+    var __moduleName = context_16 && context_16.id;
     function hexToRgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         return result ? {
@@ -1340,17 +1014,17 @@ System.register("colorMapping", [], function (exports_17, context_17) {
             b: parseInt(result[3], 16)
         } : null;
     }
-    exports_17("hexToRgb", hexToRgb);
+    exports_16("hexToRgb", hexToRgb);
     function rgbToHex(r, g, b) {
         return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
     }
-    exports_17("rgbToHex", rgbToHex);
+    exports_16("rgbToHex", rgbToHex);
     function colorDistance(color1, color2) {
         return Math.sqrt(Math.pow(color1.r - color2.r, 2) +
             Math.pow(color1.g - color2.g, 2) +
             Math.pow(color1.b - color2.b, 2));
     }
-    exports_17("colorDistance", colorDistance);
+    exports_16("colorDistance", colorDistance);
     // Find the closest matching color from the mapping
     function findClosestColor(r, g, b, mappings) {
         const targetColor = { r, g, b };
@@ -1368,7 +1042,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         }
         return closestElement;
     }
-    exports_17("findClosestColor", findClosestColor);
+    exports_16("findClosestColor", findClosestColor);
     // Convert image data to game map
     function imageDataToGameMap(imageData, mappings = DEFAULT_COLOR_MAPPINGS) {
         const { data, width, height } = imageData;
@@ -1387,7 +1061,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         }
         return gameMap;
     }
-    exports_17("imageDataToGameMap", imageDataToGameMap);
+    exports_16("imageDataToGameMap", imageDataToGameMap);
     // Find player start position
     function findPlayerStart(gameMap) {
         for (let y = 0; y < gameMap.length; y++) {
@@ -1399,7 +1073,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         }
         return null;
     }
-    exports_17("findPlayerStart", findPlayerStart);
+    exports_16("findPlayerStart", findPlayerStart);
     // Find player finish position
     function findPlayerFinish(gameMap) {
         for (let y = 0; y < gameMap.length; y++) {
@@ -1411,7 +1085,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         }
         return null;
     }
-    exports_17("findPlayerFinish", findPlayerFinish);
+    exports_16("findPlayerFinish", findPlayerFinish);
     // Get all enemy positions
     function findEnemies(gameMap) {
         const enemies = [];
@@ -1424,7 +1098,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         }
         return enemies;
     }
-    exports_17("findEnemies", findEnemies);
+    exports_16("findEnemies", findEnemies);
     // Check if a position is walkable (not a wall)
     function isWalkable(gameMap, x, y) {
         if (y < 0 || y >= gameMap.length || x < 0 || x >= gameMap[y].length) {
@@ -1433,7 +1107,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         const element = gameMap[y][x];
         return element !== GameElement.WALL && element !== GameElement.DOOR;
     }
-    exports_17("isWalkable", isWalkable);
+    exports_16("isWalkable", isWalkable);
     function getElementProperties(element) {
         switch (element) {
             case GameElement.WALL:
@@ -1543,7 +1217,7 @@ System.register("colorMapping", [], function (exports_17, context_17) {
                 };
         }
     }
-    exports_17("getElementProperties", getElementProperties);
+    exports_16("getElementProperties", getElementProperties);
     return {
         setters: [],
         execute: function () {
@@ -1562,9 +1236,9 @@ System.register("colorMapping", [], function (exports_17, context_17) {
                 GameElement["KEY"] = "key";
                 GameElement["DOOR"] = "door";
                 GameElement["STAIRS"] = "stairs";
-            })(GameElement || (exports_17("GameElement", GameElement = {})));
+            })(GameElement || (exports_16("GameElement", GameElement = {})));
             // Default color mappings based on user requirements
-            exports_17("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
+            exports_16("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
                 '#000000': GameElement.WALL, // Black - wall
                 '#FF0000': GameElement.DANGER, // Red - danger
                 '#0000FF': GameElement.WATER, // Blue - water
@@ -1583,14 +1257,504 @@ System.register("colorMapping", [], function (exports_17, context_17) {
         }
     };
 });
+System.register("components/drawingCanvas", ["util", "components/common", "colorMapping"], function (exports_17, context_17) {
+    "use strict";
+    var util_4, common_3, colorMapping_1;
+    var __moduleName = context_17 && context_17.id;
+    function createDrawingCanvas() {
+        const component = {
+            domElement: Object.assign(document.createElement("div"), { className: "drawingCanvasComponent" }),
+            getImageData: () => {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                return imageData;
+            },
+            clear: () => {
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                saveCanvasState();
+            }
+        };
+        // Drawing state
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentTool = 'pen';
+        let currentColor = '#000000';
+        let lineWidth = 2;
+        let startX = 0;
+        let startY = 0;
+        let canvasSize = 32;
+        let scaleFactor = 16; // Display scale - increased for better pixel visibility
+        // Undo functionality
+        let canvasHistory = [];
+        let historyIndex = -1;
+        const maxHistory = 50; // Maximum undo steps
+        // Action colors palette
+        const actionColorsContainer = document.createElement("div");
+        actionColorsContainer.className = "actionColorsContainer";
+        actionColorsContainer.style.display = "flex";
+        actionColorsContainer.style.flexWrap = "wrap";
+        actionColorsContainer.style.gap = "4px";
+        actionColorsContainer.style.marginBottom = "10px";
+        actionColorsContainer.style.padding = "8px";
+        actionColorsContainer.style.backgroundColor = "#f5f5f5";
+        actionColorsContainer.style.borderRadius = "4px";
+        const actionColorsTitle = document.createElement("div");
+        actionColorsTitle.textContent = "Action Colors (click to select):";
+        actionColorsTitle.style.fontSize = "12px";
+        actionColorsTitle.style.fontWeight = "bold";
+        actionColorsTitle.style.marginBottom = "6px";
+        actionColorsTitle.style.width = "100%";
+        actionColorsContainer.appendChild(actionColorsTitle);
+        // Create color buttons for functional elements
+        const actionColors = [
+            { color: '#000000', element: colorMapping_1.GameElement.WALL, name: 'Wall' },
+            { color: '#FF0000', element: colorMapping_1.GameElement.DANGER, name: 'Danger' },
+            { color: '#0000FF', element: colorMapping_1.GameElement.WATER, name: 'Water' },
+            { color: '#800080', element: colorMapping_1.GameElement.ENEMY, name: 'Enemy' },
+            { color: '#008000', element: colorMapping_1.GameElement.GRASS, name: 'Grass' },
+            { color: '#FFA500', element: colorMapping_1.GameElement.FIRE, name: 'Fire' },
+            { color: '#006400', element: colorMapping_1.GameElement.PLAYER_START, name: 'Start' },
+            { color: '#8B0000', element: colorMapping_1.GameElement.PLAYER_FINISH, name: 'Finish' },
+            { color: '#FFFF00', element: colorMapping_1.GameElement.TREASURE, name: 'Treasure' },
+            { color: '#FFD700', element: colorMapping_1.GameElement.KEY, name: 'Key' },
+            { color: '#8B4513', element: colorMapping_1.GameElement.DOOR, name: 'Door' },
+            { color: '#C0C0C0', element: colorMapping_1.GameElement.STAIRS, name: 'Stairs' },
+            { color: '#FFFFFF', element: colorMapping_1.GameElement.FLOOR, name: 'Floor' },
+        ];
+        actionColors.forEach(({ color, element, name }) => {
+            const colorButton = document.createElement("button");
+            colorButton.className = "actionColorButton";
+            colorButton.style.width = "60px";
+            colorButton.style.height = "40px";
+            colorButton.style.border = "2px solid #ccc";
+            colorButton.style.borderRadius = "4px";
+            colorButton.style.cursor = "pointer";
+            colorButton.style.backgroundColor = color;
+            colorButton.style.display = "flex";
+            colorButton.style.flexDirection = "column";
+            colorButton.style.alignItems = "center";
+            colorButton.style.justifyContent = "center";
+            colorButton.style.fontSize = "9px";
+            colorButton.style.fontWeight = "bold";
+            colorButton.style.color = getContrastColor(color);
+            colorButton.style.textShadow = "0 0 2px rgba(255,255,255,0.8)";
+            colorButton.style.position = "relative";
+            // Add border for white color to make it visible
+            if (color === '#FFFFFF') {
+                colorButton.style.border = "2px solid #333";
+                colorButton.style.boxShadow = "inset 0 0 0 1px #333";
+            }
+            // Add tooltip with full name
+            colorButton.title = `${name} (${color})`;
+            // Add element properties indicator
+            const props = colorMapping_1.getElementProperties(element);
+            const indicators = [];
+            if (!props.walkable)
+                indicators.push('🚫');
+            if (props.dangerous)
+                indicators.push('⚠️');
+            if (props.collectible)
+                indicators.push('💎');
+            if (props.interactive)
+                indicators.push('🎯');
+            const indicatorText = indicators.join('');
+            if (indicatorText) {
+                const indicator = document.createElement("span");
+                indicator.textContent = indicatorText;
+                indicator.style.fontSize = "8px";
+                indicator.style.position = "absolute";
+                indicator.style.top = "2px";
+                indicator.style.right = "2px";
+                colorButton.appendChild(indicator);
+            }
+            // Shortened name for button
+            const shortName = name.length > 6 ? name.substring(0, 6) : name;
+            const nameSpan = document.createElement("span");
+            nameSpan.textContent = shortName;
+            colorButton.appendChild(nameSpan);
+            // Click handler
+            colorButton.onclick = () => {
+                currentColor = color;
+                colorInput.value = color;
+                // Add visual feedback
+                colorButton.style.transform = "scale(0.95)";
+                setTimeout(() => {
+                    colorButton.style.transform = "scale(1)";
+                }, 100);
+            };
+            // Hover effects
+            colorButton.onmouseenter = () => {
+                colorButton.style.transform = "scale(1.05)";
+                colorButton.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+            };
+            colorButton.onmouseleave = () => {
+                colorButton.style.transform = "scale(1)";
+                colorButton.style.boxShadow = "none";
+            };
+            actionColorsContainer.appendChild(colorButton);
+        });
+        // Helper function to get contrasting text color
+        function getContrastColor(bgColor) {
+            // Simple contrast calculation - return white for dark colors, black for light
+            const hex = bgColor.replace('#', '');
+            const r = parseInt(hex.substr(0, 2), 16);
+            const g = parseInt(hex.substr(2, 2), 16);
+            const b = parseInt(hex.substr(4, 2), 16);
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+            return brightness > 128 ? '#000000' : '#FFFFFF';
+        }
+        // Create canvas
+        const canvas = document.createElement("canvas");
+        canvas.width = canvasSize;
+        canvas.height = canvasSize;
+        canvas.className = "drawingCanvas";
+        canvas.style.border = "1px solid #ccc";
+        canvas.style.cursor = "crosshair";
+        canvas.style.width = `${canvasSize * scaleFactor}px`;
+        canvas.style.height = `${canvasSize * scaleFactor}px`;
+        canvas.style.imageRendering = "pixelated";
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Canvas size selection
+        const sizeSelect = document.createElement("select");
+        sizeSelect.innerHTML = `
+    <option value="16">16x16</option>
+    <option value="32">32x32</option>
+    <option value="64">64x64</option>
+  `;
+        sizeSelect.value = canvasSize.toString();
+        sizeSelect.onchange = () => {
+            canvasSize = parseInt(sizeSelect.value);
+            updateCanvasSize();
+        };
+        // Tool selection
+        const toolSelect = document.createElement("select");
+        toolSelect.innerHTML = `
+    <option value="pen">Pen</option>
+    <option value="eraser">Eraser</option>
+    <option value="bucket">Paint Bucket</option>
+    <option value="rectangle">Rectangle</option>
+    <option value="circle">Circle</option>
+    <option value="line">Line</option>
+    <option value="spray">Spray</option>
+  `;
+        toolSelect.value = currentTool;
+        toolSelect.onchange = () => {
+            currentTool = toolSelect.value;
+            canvas.style.cursor = currentTool === 'eraser' ? 'not-allowed' :
+                currentTool === 'bucket' ? 'pointer' : 'crosshair';
+        };
+        // Color picker
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = currentColor;
+        colorInput.onchange = () => {
+            currentColor = colorInput.value;
+        };
+        // Line width slider
+        const widthLabel = document.createElement("label");
+        widthLabel.textContent = "Size: ";
+        const widthInput = document.createElement("input");
+        widthInput.type = "range";
+        widthInput.min = "1";
+        widthInput.max = "20";
+        widthInput.value = lineWidth.toString();
+        widthInput.oninput = () => {
+            lineWidth = parseInt(widthInput.value);
+        };
+        // Clear button
+        const clearButton = document.createElement("input");
+        clearButton.type = "button";
+        clearButton.value = "Clear Canvas";
+        clearButton.onclick = () => {
+            component.clear();
+        };
+        // Undo button
+        const undoButton = document.createElement("input");
+        undoButton.type = "button";
+        undoButton.value = "Undo";
+        undoButton.disabled = true;
+        undoButton.onclick = () => {
+            undo();
+        };
+        // Use drawing button
+        const useDrawingButton = document.createElement("input");
+        useDrawingButton.type = "button";
+        useDrawingButton.value = "Use This Drawing";
+        useDrawingButton.onclick = () => {
+            const imageData = component.getImageData();
+            if (imageData && component.onDrawComplete) {
+                component.onDrawComplete(imageData);
+            }
+        };
+        // Helper functions
+        function updateCanvasSize() {
+            canvasSize = parseInt(sizeSelect.value);
+            canvas.width = canvasSize;
+            canvas.height = canvasSize;
+            canvas.style.width = `${canvasSize * scaleFactor}px`;
+            canvas.style.height = `${canvasSize * scaleFactor}px`;
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            saveCanvasState(); // Save state after resize
+        }
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+        function saveCanvasState() {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            // Remove any history after current index (when user draws after undoing)
+            canvasHistory = canvasHistory.slice(0, historyIndex + 1);
+            // Add new state
+            canvasHistory.push(imageData);
+            // Keep only the last maxHistory states
+            if (canvasHistory.length > maxHistory) {
+                canvasHistory.shift();
+            }
+            else {
+                historyIndex++;
+            }
+            // Enable undo button if we have history
+            undoButton.disabled = historyIndex <= 0;
+        }
+        function undo() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                const previousState = canvasHistory[historyIndex];
+                ctx.putImageData(previousState, 0, 0);
+                undoButton.disabled = historyIndex <= 0;
+            }
+        }
+        // Initialize canvas history with blank state
+        saveCanvasState();
+        // Drawing functions
+        function startDrawing(e) {
+            isDrawing = true;
+            const coords = getCanvasCoordinates(e);
+            [lastX, lastY] = [coords.x, coords.y];
+            [startX, startY] = [coords.x, coords.y];
+            if ((currentTool === 'pen' || currentTool === 'eraser') && lineWidth === 1) {
+                // For pixel-perfect pen with size 1, draw immediately on click
+                ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+                ctx.fillRect(Math.floor(coords.x), Math.floor(coords.y), 1, 1);
+            }
+            else if (currentTool === 'pen' || currentTool === 'eraser') {
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+            }
+            else if (currentTool === 'bucket') {
+                // For bucket tool, fill immediately on click
+                floodFill(Math.floor(coords.x), Math.floor(coords.y), currentColor);
+                saveCanvasState();
+                isDrawing = false;
+            }
+        }
+        function draw(e) {
+            if (!isDrawing)
+                return;
+            const coords = getCanvasCoordinates(e);
+            const x = coords.x;
+            const y = coords.y;
+            ctx.strokeStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+            switch (currentTool) {
+                case 'pen':
+                case 'eraser':
+                    if (lineWidth === 1) {
+                        // Pixel-perfect drawing for size 1 - only draw if moved to a different pixel
+                        const currentPixelX = Math.floor(x);
+                        const currentPixelY = Math.floor(y);
+                        const lastPixelX = Math.floor(lastX);
+                        const lastPixelY = Math.floor(lastY);
+                        if (currentPixelX !== lastPixelX || currentPixelY !== lastPixelY) {
+                            ctx.fillStyle = currentTool === 'eraser' ? '#FFFFFF' : currentColor;
+                            ctx.fillRect(currentPixelX, currentPixelY, 1, 1);
+                        }
+                    }
+                    else {
+                        // Normal line drawing for larger sizes
+                        ctx.lineWidth = lineWidth;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.lineTo(x, y);
+                        ctx.stroke();
+                    }
+                    break;
+                case 'spray':
+                    sprayPaint(x, y);
+                    break;
+            }
+            [lastX, lastY] = [x, y];
+        }
+        function stopDrawing(e) {
+            if (!isDrawing)
+                return;
+            isDrawing = false;
+            const coords = getCanvasCoordinates(e);
+            const x = coords.x;
+            const y = coords.y;
+            switch (currentTool) {
+                case 'rectangle':
+                    drawRectangle(startX, startY, x, y);
+                    break;
+                case 'circle':
+                    drawCircle(startX, startY, x, y);
+                    break;
+                case 'line':
+                    drawLine(startX, startY, x, y);
+                    break;
+            }
+            // Save canvas state after drawing
+            saveCanvasState();
+        }
+        function sprayPaint(x, y) {
+            const density = 50;
+            const radius = lineWidth * 2;
+            for (let i = 0; i < density; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * radius;
+                const sprayX = x + Math.cos(angle) * distance;
+                const sprayY = y + Math.sin(angle) * distance;
+                ctx.fillStyle = currentColor;
+                ctx.beginPath();
+                ctx.arc(sprayX, sprayY, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        function drawRectangle(x1, y1, x2, y2) {
+            const width = x2 - x1;
+            const height = y2 - y1;
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.strokeRect(x1, y1, width, height);
+        }
+        function drawCircle(x1, y1, x2, y2) {
+            const radius = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.arc(x1, y1, radius, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        function drawLine(x1, y1, x2, y2) {
+            ctx.strokeStyle = currentColor;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+        function floodFill(startX, startY, fillColor) {
+            // Get the image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            // Convert fill color to RGB
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.fillStyle = fillColor;
+            tempCtx.fillRect(0, 0, 1, 1);
+            const fillData = tempCtx.getImageData(0, 0, 1, 1).data;
+            const fillR = fillData[0];
+            const fillG = fillData[1];
+            const fillB = fillData[2];
+            // Get the color we're replacing
+            const startIndex = (startY * canvas.width + startX) * 4;
+            const targetR = data[startIndex];
+            const targetG = data[startIndex + 1];
+            const targetB = data[startIndex + 2];
+            // Don't fill if the target color is the same as fill color
+            if (targetR === fillR && targetG === fillG && targetB === fillB) {
+                return;
+            }
+            // Flood fill using stack-based approach
+            const stack = [[startX, startY]];
+            const visited = new Set();
+            while (stack.length > 0) {
+                const [x, y] = stack.pop();
+                const key = `${x},${y}`;
+                if (visited.has(key) || x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
+                    continue;
+                }
+                const index = (y * canvas.width + x) * 4;
+                const r = data[index];
+                const g = data[index + 1];
+                const b = data[index + 2];
+                // Check if this pixel matches the target color
+                if (r === targetR && g === targetG && b === targetB) {
+                    // Fill the pixel
+                    data[index] = fillR;
+                    data[index + 1] = fillG;
+                    data[index + 2] = fillB;
+                    data[index + 3] = 255; // Alpha
+                    visited.add(key);
+                    // Add adjacent pixels to stack
+                    stack.push([x + 1, y]);
+                    stack.push([x - 1, y]);
+                    stack.push([x, y + 1]);
+                    stack.push([x, y - 1]);
+                }
+            }
+            // Put the modified image data back
+            ctx.putImageData(imageData, 0, 0);
+        }
+        // Event listeners
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        // Build DOM
+        util_4.buildDomTree(component.domElement, [
+            document.createElement("p"), [
+                "Create a custom image for wave function collapse. Draw simple patterns with distinct colors."
+            ],
+            actionColorsContainer,
+            common_3.inputGroup(), [
+                document.createElement("label"), ["Canvas Size: ", sizeSelect],
+                document.createElement("label"), ["Tool: ", toolSelect],
+                document.createElement("label"), ["Color: ", colorInput],
+                widthLabel, widthInput,
+            ],
+            common_3.inputGroup(), [
+                clearButton,
+                undoButton,
+                useDrawingButton,
+            ],
+            canvas,
+        ]);
+        return component;
+    }
+    exports_17("createDrawingCanvas", createDrawingCanvas);
+    return {
+        setters: [
+            function (util_4_1) {
+                util_4 = util_4_1;
+            },
+            function (common_3_1) {
+                common_3 = common_3_1;
+            },
+            function (colorMapping_1_1) {
+                colorMapping_1 = colorMapping_1_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
 System.register("components/colorReference", ["colorMapping"], function (exports_18, context_18) {
     "use strict";
-    var colorMapping_1;
+    var colorMapping_2;
     var __moduleName = context_18 && context_18.id;
     function createColorReference() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "colorReferenceComponent" }),
-            updateMappings: (mappings = colorMapping_1.DEFAULT_COLOR_MAPPINGS) => {
+            updateMappings: (mappings = colorMapping_2.DEFAULT_COLOR_MAPPINGS) => {
                 updateColorGrid(mappings);
             }
         };
@@ -1655,7 +1819,7 @@ System.register("components/colorReference", ["colorMapping"], function (exports
                 const colorDesc = document.createElement("div");
                 colorDesc.className = "colorDesc";
                 colorDesc.textContent = colorDescriptions[hexColor] || `${gameElement.replace('_', ' ')}`;
-                const elementProps = colorMapping_1.getElementProperties(gameElement);
+                const elementProps = colorMapping_2.getElementProperties(gameElement);
                 const colorProps = document.createElement("div");
                 colorProps.className = "colorProps";
                 // Add property indicators
@@ -1690,8 +1854,8 @@ System.register("components/colorReference", ["colorMapping"], function (exports
     exports_18("createColorReference", createColorReference);
     return {
         setters: [
-            function (colorMapping_1_1) {
-                colorMapping_1 = colorMapping_1_1;
+            function (colorMapping_2_1) {
+                colorMapping_2 = colorMapping_2_1;
             }
         ],
         execute: function () {
@@ -2045,7 +2209,7 @@ System.register("components/imageEditor", ["util", "components/common", "compone
 });
 System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (exports_20, context_20) {
     "use strict";
-    var colorMapping_2;
+    var colorMapping_3;
     var __moduleName = context_20 && context_20.id;
     function createThreeJSDungeonCrawler() {
         const component = {
@@ -2100,6 +2264,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         // Debug variables
         let debugMode = false;
         let debugSpheres = [];
+        // Particle system variables
+        let particleSystems = new Map();
+        let fireLights = [];
         async function initializeGame(gameMap, playerStart) {
             currentGameMap = gameMap;
             player.x = playerStart.x + 0.5;
@@ -2184,6 +2351,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             createWalls(mapWidth, mapHeight);
             // Create sprites for interactive elements
             createSprites();
+            // Create particle effects for atmospheric elements
+            createParticleEffects();
             // Initialize debug visualization
             createDebugSpheres();
         }
@@ -2231,7 +2400,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
                     const element = currentGameMap[y][x];
-                    const properties = colorMapping_2.getElementProperties(element);
+                    const properties = colorMapping_3.getElementProperties(element);
                     if (!properties.walkable) {
                         createWall(x, y, element);
                     }
@@ -2285,16 +2454,16 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         function getWallTexture(element) {
             let texturePath;
             switch (element) {
-                case colorMapping_2.GameElement.WALL:
+                case colorMapping_3.GameElement.WALL:
                     texturePath = 'textures/wall_stone.png';
                     break;
-                case colorMapping_2.GameElement.DOOR:
+                case colorMapping_3.GameElement.DOOR:
                     texturePath = 'textures/wood_texture.png';
                     break;
-                case colorMapping_2.GameElement.DANGER:
+                case colorMapping_3.GameElement.DANGER:
                     texturePath = 'textures/danger_texture.png';
                     break;
-                case colorMapping_2.GameElement.FIRE:
+                case colorMapping_3.GameElement.FIRE:
                     texturePath = 'textures/fire_texture.png';
                     break;
                 default:
@@ -2314,8 +2483,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             for (let y = 0; y < currentGameMap.length; y++) {
                 for (let x = 0; x < currentGameMap[y].length; x++) {
                     const element = currentGameMap[y][x];
-                    const properties = colorMapping_2.getElementProperties(element);
-                    if (properties.interactive || element === colorMapping_2.GameElement.ENEMY) {
+                    // Create sprites for ALL elements that have sprites, not just interactive ones
+                    // Skip WALL since walls are handled by createWalls()
+                    if (element !== colorMapping_3.GameElement.WALL && element !== colorMapping_3.GameElement.FLOOR) {
                         createSprite(x, y, element);
                     }
                 }
@@ -2323,37 +2493,265 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         }
         function createSprite(x, y, element) {
             const spritePath = getSpritePath(element);
-            if (!spritePath)
-                return;
-            // Load sprite texture
-            const texture = textureLoader.load(spritePath);
-            // Create sprite material
-            const spriteMaterial = new THREE.SpriteMaterial({
-                map: texture,
-                transparent: true
+            if (spritePath) {
+                // Create sprite with texture
+                const texture = textureLoader.load(spritePath);
+                const spriteMaterial = new THREE.SpriteMaterial({
+                    map: texture,
+                    transparent: true
+                });
+                const sprite = new THREE.Sprite(spriteMaterial);
+                sprite.position.set(x, 1, y);
+                sprite.scale.set(0.8, 0.8, 0.8);
+                scene.add(sprite);
+            }
+            else {
+                // Create colored quad for elements without sprites
+                createColoredQuad(x, y, element);
+            }
+        }
+        function createColoredQuad(x, y, element) {
+            // Create a simple colored plane for elements without sprites
+            const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+            const material = new THREE.MeshBasicMaterial({
+                color: getElementColor(element),
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide
             });
-            // Create sprite
-            const sprite = new THREE.Sprite(spriteMaterial);
-            sprite.position.set(x, 1, y);
-            sprite.scale.set(0.8, 0.8, 0.8);
-            scene.add(sprite);
+            const quad = new THREE.Mesh(geometry, material);
+            quad.position.set(x, 0.1, y); // Slightly above ground
+            quad.rotation.x = -Math.PI / 2; // Lay flat on ground
+            // Add subtle animation for interactive elements
+            if (colorMapping_3.getElementProperties(element).interactive) {
+                quad.userData = { originalY: 0.1, element };
+                quad.animate = true;
+            }
+            scene.add(quad);
+        }
+        function createParticleEffects() {
+            // Clear existing particle systems
+            particleSystems.forEach(systems => {
+                systems.forEach(system => scene.remove(system));
+            });
+            particleSystems.clear();
+            // Clear existing fire lights
+            fireLights.forEach(light => scene.remove(light));
+            fireLights = [];
+            // Create particle effects for each element type
+            for (let y = 0; y < currentGameMap.length; y++) {
+                for (let x = 0; x < currentGameMap[y].length; x++) {
+                    const element = currentGameMap[y][x];
+                    const properties = colorMapping_3.getElementProperties(element);
+                    // Only create particles for non-wall elements that need atmosphere
+                    if (element !== colorMapping_3.GameElement.WALL && element !== colorMapping_3.GameElement.FLOOR) {
+                        createParticlesForElement(x, y, element);
+                    }
+                    // Add fire lights
+                    if (element === colorMapping_3.GameElement.FIRE) {
+                        createFireLight(x, y);
+                    }
+                }
+            }
+        }
+        function createParticlesForElement(x, y, element) {
+            const particleConfig = getParticleConfig(element);
+            if (!particleConfig)
+                return;
+            const { count, color, size, speed, spread } = particleConfig;
+            // Create particle geometry
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            const sizes = new Float32Array(count);
+            // Initialize particles in a small area around the element
+            for (let i = 0; i < count; i++) {
+                const i3 = i * 3;
+                // Random position within spread area
+                positions[i3] = x + (Math.random() - 0.5) * spread;
+                positions[i3 + 1] = 0.5 + Math.random() * 0.5; // Above ground
+                positions[i3 + 2] = y + (Math.random() - 0.5) * spread;
+                // Set color
+                colors[i3] = ((color >> 16) & 255) / 255;
+                colors[i3 + 1] = ((color >> 8) & 255) / 255;
+                colors[i3 + 2] = (color & 255) / 255;
+                // Set size
+                sizes[i] = size * (0.5 + Math.random() * 0.5);
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            // Create material for billboard particles
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    pixelRatio: { value: window.devicePixelRatio }
+                },
+                vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        varying vec3 vColor;
+        varying float vSize;
+        uniform float time;
+        uniform float pixelRatio;
+
+        void main() {
+          vColor = color;
+          vSize = size;
+
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          gl_PointSize = size * pixelRatio * (300.0 / -mvPosition.z);
+        }
+      `,
+                fragmentShader: `
+        varying vec3 vColor;
+        varying float vSize;
+
+        void main() {
+          float distance = length(gl_PointCoord - vec2(0.5));
+          if (distance > 0.5) discard;
+
+          // Soft circular particles
+          float alpha = 1.0 - smoothstep(0.0, 0.5, distance);
+          gl_FragColor = vec4(vColor, alpha * 0.6);
+        }
+      `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const particleSystem = new THREE.Points(geometry, material);
+            particleSystem.userData = { element, x, y, speed, originalPositions: positions.slice() };
+            scene.add(particleSystem);
+            // Add to particle systems map
+            if (!particleSystems.has(element)) {
+                particleSystems.set(element, []);
+            }
+            particleSystems.get(element).push(particleSystem);
+        }
+        function getParticleConfig(element) {
+            switch (element) {
+                case colorMapping_3.GameElement.WATER:
+                    return {
+                        count: 8,
+                        color: 0x4488ff, // Light blue
+                        size: 3,
+                        speed: 0.5,
+                        spread: 0.6
+                    };
+                case colorMapping_3.GameElement.GRASS:
+                    return {
+                        count: 6,
+                        color: 0x22aa44, // Green
+                        size: 2,
+                        speed: 0.3,
+                        spread: 0.8
+                    };
+                case colorMapping_3.GameElement.FIRE:
+                    return {
+                        count: 12,
+                        color: 0xff6600, // Orange
+                        size: 4,
+                        speed: 1.5,
+                        spread: 0.4
+                    };
+                case colorMapping_3.GameElement.DANGER:
+                    return {
+                        count: 10,
+                        color: 0xff0044, // Red
+                        size: 3,
+                        speed: 1.0,
+                        spread: 0.7
+                    };
+                case colorMapping_3.GameElement.PLAYER_START:
+                    return {
+                        count: 5,
+                        color: 0xffff88, // Light yellow
+                        size: 2,
+                        speed: 0.8,
+                        spread: 0.3
+                    };
+                default:
+                    return null;
+            }
+        }
+        function createFireLight(x, y) {
+            const fireLight = new THREE.PointLight(0xffaa44, 0.8, 6);
+            fireLight.position.set(x, 0.8, y);
+            fireLight.castShadow = false; // Don't cast shadows to avoid performance issues
+            scene.add(fireLight);
+            fireLights.push(fireLight);
+        }
+        function updateParticleEffects() {
+            const time = Date.now() * 0.001;
+            particleSystems.forEach((systems, element) => {
+                systems.forEach(system => {
+                    const material = system.material;
+                    material.uniforms.time.value = time;
+                    // Animate particles based on their type
+                    const positions = system.geometry.attributes.position.array;
+                    const originalPositions = system.userData.originalPositions;
+                    const speed = system.userData.speed;
+                    for (let i = 0; i < positions.length; i += 3) {
+                        // Gentle floating motion
+                        positions[i + 1] = originalPositions[i + 1] + Math.sin(time * speed + i * 0.1) * 0.1;
+                        // For fire particles, add more chaotic motion
+                        if (element === colorMapping_3.GameElement.FIRE) {
+                            positions[i] = originalPositions[i] + Math.sin(time * speed * 2 + i * 0.2) * 0.05;
+                            positions[i + 2] = originalPositions[i + 2] + Math.cos(time * speed * 1.5 + i * 0.15) * 0.05;
+                        }
+                    }
+                    system.geometry.attributes.position.needsUpdate = true;
+                });
+            });
+            // Animate fire lights with flickering
+            fireLights.forEach((light, index) => {
+                const baseIntensity = 0.8;
+                const flicker = Math.sin(time * 8 + index) * 0.2 + Math.sin(time * 12 + index * 2) * 0.1;
+                light.intensity = baseIntensity + flicker;
+            });
+        }
+        function getElementColor(element) {
+            switch (element) {
+                case colorMapping_3.GameElement.GRASS:
+                    return 0x008000; // Green
+                case colorMapping_3.GameElement.WATER:
+                    return 0x0000FF; // Blue
+                case colorMapping_3.GameElement.FIRE:
+                    return 0xFF4500; // Orange-Red
+                case colorMapping_3.GameElement.PLAYER_START:
+                    return 0xFFFF00; // Yellow
+                case colorMapping_3.GameElement.DANGER:
+                    return 0xFF0000; // Red
+                default:
+                    return 0xFFFFFF; // White fallback
+            }
         }
         function getSpritePath(element) {
             switch (element) {
-                case colorMapping_2.GameElement.ENEMY:
+                case colorMapping_3.GameElement.ENEMY:
                     return 'sprites/enemy.png';
-                case colorMapping_2.GameElement.DANGER:
+                case colorMapping_3.GameElement.DANGER:
                     return 'sprites/danger.png';
-                case colorMapping_2.GameElement.PLAYER_FINISH:
+                case colorMapping_3.GameElement.PLAYER_FINISH:
                     return 'sprites/finish.png';
-                case colorMapping_2.GameElement.TREASURE:
+                case colorMapping_3.GameElement.TREASURE:
                     return 'sprites/treasure.png';
-                case colorMapping_2.GameElement.KEY:
+                case colorMapping_3.GameElement.KEY:
                     return 'sprites/key.png';
-                case colorMapping_2.GameElement.DOOR:
+                case colorMapping_3.GameElement.DOOR:
                     return 'sprites/door.png';
-                case colorMapping_2.GameElement.STAIRS:
+                case colorMapping_3.GameElement.STAIRS:
                     return 'sprites/stairs.png';
+                case colorMapping_3.GameElement.FIRE:
+                    return 'sprites/blade.png'; // Use blade sprite for fire
+                case colorMapping_3.GameElement.GRASS:
+                    return null; // Will create colored quad instead
+                case colorMapping_3.GameElement.WATER:
+                    return null; // Will create colored quad instead
+                case colorMapping_3.GameElement.PLAYER_START:
+                    return null; // Will create colored quad instead
                 default:
                     return null;
             }
@@ -2493,7 +2891,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 // Check each valid cell for walls
                 for (const cell of validCells) {
                     const element = currentGameMap[cell.y][cell.x];
-                    const properties = colorMapping_2.getElementProperties(element);
+                    const properties = colorMapping_3.getElementProperties(element);
                     if (!properties.walkable) {
                         // Check if the collision point is within this wall's 3D bounding box
                         // Wall occupies: [cell.x - 0.5, cell.x + 0.5] x [0, WALL_HEIGHT] x [cell.y - 0.5, cell.y + 0.5]
@@ -2643,7 +3041,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 for (let y = 0; y < currentGameMap.length; y++) {
                     for (let x = 0; x < currentGameMap[y].length; x++) {
                         const element = currentGameMap[y][x];
-                        const properties = colorMapping_2.getElementProperties(element);
+                        const properties = colorMapping_3.getElementProperties(element);
                         if (!properties.walkable) {
                             // Recreate wireframe for this wall
                             const wireframeGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
@@ -2689,7 +3087,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                     if (tileX >= 0 && tileX < currentGameMap[0].length &&
                         tileY >= 0 && tileY < currentGameMap.length) {
                         const element = currentGameMap[tileY][tileX];
-                        const properties = colorMapping_2.getElementProperties(element);
+                        const properties = colorMapping_3.getElementProperties(element);
                         const material = debugSpheres[index].material;
                         material.color.setHex(properties.walkable ? 0x00ff00 : 0xff0000);
                     }
@@ -2701,8 +3099,22 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 return;
             updatePlayer();
             updateDebugVisualization();
+            updateSpriteAnimations();
+            updateParticleEffects();
             renderer.render(scene, camera);
             animationId = requestAnimationFrame(gameLoop);
+        }
+        function updateSpriteAnimations() {
+            // Animate interactive elements with subtle floating motion
+            const time = Date.now() * 0.001; // Convert to seconds
+            scene.children.forEach(child => {
+                if (child.userData && child.userData.originalY !== undefined && child.animate) {
+                    const originalY = child.userData.originalY;
+                    const amplitude = 0.05; // Subtle floating amplitude
+                    const frequency = 2.0; // Floating speed
+                    child.position.y = originalY + Math.sin(time * frequency) * amplitude;
+                }
+            });
         }
         // Input handling
         function handleKeyDown(e) {
@@ -2738,8 +3150,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
     exports_20("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
     return {
         setters: [
-            function (colorMapping_2_1) {
-                colorMapping_2 = colorMapping_2_1;
+            function (colorMapping_3_1) {
+                colorMapping_3 = colorMapping_3_1;
             }
         ],
         execute: function () {
@@ -2913,7 +3325,7 @@ System.register("components/imageUploader", ["getImageData", "util", "components
 });
 System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "colorMapping"], function (exports_22, context_22) {
     "use strict";
-    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, colorMapping_3, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
+    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, colorMapping_4, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
     var __moduleName = context_22 && context_22.id;
     // Tab switching logic for input tabs
     function switchInputTab(activeTab, inactiveTabs, showElement) {
@@ -3023,16 +3435,16 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         if (!generatedImageData)
             return;
         // Convert image to game map
-        gameMap = colorMapping_3.imageDataToGameMap(generatedImageData);
+        gameMap = colorMapping_4.imageDataToGameMap(generatedImageData);
         // Find player start position
-        const playerStart = colorMapping_3.findPlayerStart(gameMap);
+        const playerStart = colorMapping_4.findPlayerStart(gameMap);
         if (!playerStart) {
             alert("No player start position found! Please add a dark green (#006400) pixel to mark the start.");
             switchMode(AppMode.IMAGE_EDITING);
             return;
         }
         // Find player finish position
-        const playerFinish = colorMapping_3.findPlayerFinish(gameMap);
+        const playerFinish = colorMapping_4.findPlayerFinish(gameMap);
         if (!playerFinish) {
             alert("No player finish position found! Please add a dark red (#8B0000) pixel to mark the finish.");
             switchMode(AppMode.IMAGE_EDITING);
@@ -3072,8 +3484,8 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             function (imageUploader_1_1) {
                 imageUploader_1 = imageUploader_1_1;
             },
-            function (colorMapping_3_1) {
-                colorMapping_3 = colorMapping_3_1;
+            function (colorMapping_4_1) {
+                colorMapping_4 = colorMapping_4_1;
             }
         ],
         execute: function () {
@@ -3169,9 +3581,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                 // Store the uploaded image as generated image data
                 generatedImageData = image;
                 // Check if the uploaded map has required start/finish points
-                const tempGameMap = colorMapping_3.imageDataToGameMap(image);
-                const playerStart = colorMapping_3.findPlayerStart(tempGameMap);
-                const playerFinish = colorMapping_3.findPlayerFinish(tempGameMap);
+                const tempGameMap = colorMapping_4.imageDataToGameMap(image);
+                const playerStart = colorMapping_4.findPlayerStart(tempGameMap);
+                const playerFinish = colorMapping_4.findPlayerFinish(tempGameMap);
                 if (!playerStart || !playerFinish) {
                     // Missing start or finish points - go to image editor first
                     const missingElements = [];

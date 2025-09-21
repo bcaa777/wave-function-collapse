@@ -100,6 +100,10 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   let debugMode = false;
   let debugSpheres: THREE.Mesh[] = [];
 
+  // Particle system variables
+  let particleSystems: Map<GameElement, THREE.Points[]> = new Map();
+  let fireLights: THREE.PointLight[] = [];
+
   async function initializeGame(gameMap: GameElement[][], playerStart: { x: number; y: number }): Promise<void> {
     currentGameMap = gameMap;
     player.x = playerStart.x + 0.5;
@@ -205,6 +209,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     // Create sprites for interactive elements
     createSprites();
+
+    // Create particle effects for atmospheric elements
+    createParticleEffects();
 
     // Initialize debug visualization
     createDebugSpheres();
@@ -358,9 +365,10 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     for (let y = 0; y < currentGameMap.length; y++) {
       for (let x = 0; x < currentGameMap[y].length; x++) {
         const element = currentGameMap[y][x];
-        const properties = getElementProperties(element);
 
-        if (properties.interactive || element === GameElement.ENEMY) {
+        // Create sprites for ALL elements that have sprites, not just interactive ones
+        // Skip WALL since walls are handled by createWalls()
+        if (element !== GameElement.WALL && element !== GameElement.FLOOR) {
           createSprite(x, y, element);
         }
       }
@@ -369,23 +377,271 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
   function createSprite(x: number, y: number, element: GameElement): void {
     const spritePath = getSpritePath(element);
-    if (!spritePath) return;
 
-    // Load sprite texture
-    const texture = textureLoader.load(spritePath);
+    if (spritePath) {
+      // Create sprite with texture
+      const texture = textureLoader.load(spritePath);
+      const spriteMaterial = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true
+      });
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.position.set(x, 1, y);
+      sprite.scale.set(0.8, 0.8, 0.8);
+      scene.add(sprite);
+    } else {
+      // Create colored quad for elements without sprites
+      createColoredQuad(x, y, element);
+    }
+  }
 
-    // Create sprite material
-    const spriteMaterial = new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true
+  function createColoredQuad(x: number, y: number, element: GameElement): void {
+    // Create a simple colored plane for elements without sprites
+    const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+    const material = new THREE.MeshBasicMaterial({
+      color: getElementColor(element),
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide
     });
 
-    // Create sprite
-    const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.position.set(x, 1, y);
-    sprite.scale.set(0.8, 0.8, 0.8);
+    const quad = new THREE.Mesh(geometry, material);
+    quad.position.set(x, 0.1, y); // Slightly above ground
+    quad.rotation.x = -Math.PI / 2; // Lay flat on ground
 
-    scene.add(sprite);
+    // Add subtle animation for interactive elements
+    if (getElementProperties(element).interactive) {
+      quad.userData = { originalY: 0.1, element };
+      (quad as any).animate = true;
+    }
+
+    scene.add(quad);
+  }
+
+  function createParticleEffects(): void {
+    // Clear existing particle systems
+    particleSystems.forEach(systems => {
+      systems.forEach(system => scene.remove(system));
+    });
+    particleSystems.clear();
+
+    // Clear existing fire lights
+    fireLights.forEach(light => scene.remove(light));
+    fireLights = [];
+
+    // Create particle effects for each element type
+    for (let y = 0; y < currentGameMap.length; y++) {
+      for (let x = 0; x < currentGameMap[y].length; x++) {
+        const element = currentGameMap[y][x];
+        const properties = getElementProperties(element);
+
+        // Only create particles for non-wall elements that need atmosphere
+        if (element !== GameElement.WALL && element !== GameElement.FLOOR) {
+          createParticlesForElement(x, y, element);
+        }
+
+        // Add fire lights
+        if (element === GameElement.FIRE) {
+          createFireLight(x, y);
+        }
+      }
+    }
+  }
+
+  function createParticlesForElement(x: number, y: number, element: GameElement): void {
+    const particleConfig = getParticleConfig(element);
+    if (!particleConfig) return;
+
+    const { count, color, size, speed, spread } = particleConfig;
+
+    // Create particle geometry
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+
+    // Initialize particles in a small area around the element
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+
+      // Random position within spread area
+      positions[i3] = x + (Math.random() - 0.5) * spread;
+      positions[i3 + 1] = 0.5 + Math.random() * 0.5; // Above ground
+      positions[i3 + 2] = y + (Math.random() - 0.5) * spread;
+
+      // Set color
+      colors[i3] = ((color >> 16) & 255) / 255;
+      colors[i3 + 1] = ((color >> 8) & 255) / 255;
+      colors[i3 + 2] = (color & 255) / 255;
+
+      // Set size
+      sizes[i] = size * (0.5 + Math.random() * 0.5);
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    // Create material for billboard particles
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        pixelRatio: { value: window.devicePixelRatio }
+      },
+      vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        varying vec3 vColor;
+        varying float vSize;
+        uniform float time;
+        uniform float pixelRatio;
+
+        void main() {
+          vColor = color;
+          vSize = size;
+
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          gl_PointSize = size * pixelRatio * (300.0 / -mvPosition.z);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vSize;
+
+        void main() {
+          float distance = length(gl_PointCoord - vec2(0.5));
+          if (distance > 0.5) discard;
+
+          // Soft circular particles
+          float alpha = 1.0 - smoothstep(0.0, 0.5, distance);
+          gl_FragColor = vec4(vColor, alpha * 0.6);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const particleSystem = new THREE.Points(geometry, material);
+    particleSystem.userData = { element, x, y, speed, originalPositions: positions.slice() };
+
+    scene.add(particleSystem);
+
+    // Add to particle systems map
+    if (!particleSystems.has(element)) {
+      particleSystems.set(element, []);
+    }
+    particleSystems.get(element)!.push(particleSystem);
+  }
+
+  function getParticleConfig(element: GameElement): { count: number; color: number; size: number; speed: number; spread: number } | null {
+    switch (element) {
+      case GameElement.WATER:
+        return {
+          count: 8,
+          color: 0x4488ff, // Light blue
+          size: 3,
+          speed: 0.5,
+          spread: 0.6
+        };
+      case GameElement.GRASS:
+        return {
+          count: 6,
+          color: 0x22aa44, // Green
+          size: 2,
+          speed: 0.3,
+          spread: 0.8
+        };
+      case GameElement.FIRE:
+        return {
+          count: 12,
+          color: 0xff6600, // Orange
+          size: 4,
+          speed: 1.5,
+          spread: 0.4
+        };
+      case GameElement.DANGER:
+        return {
+          count: 10,
+          color: 0xff0044, // Red
+          size: 3,
+          speed: 1.0,
+          spread: 0.7
+        };
+      case GameElement.PLAYER_START:
+        return {
+          count: 5,
+          color: 0xffff88, // Light yellow
+          size: 2,
+          speed: 0.8,
+          spread: 0.3
+        };
+      default:
+        return null;
+    }
+  }
+
+  function createFireLight(x: number, y: number): void {
+    const fireLight = new THREE.PointLight(0xffaa44, 0.8, 6);
+    fireLight.position.set(x, 0.8, y);
+    fireLight.castShadow = false; // Don't cast shadows to avoid performance issues
+
+    scene.add(fireLight);
+    fireLights.push(fireLight);
+  }
+
+  function updateParticleEffects(): void {
+    const time = Date.now() * 0.001;
+
+    particleSystems.forEach((systems, element) => {
+      systems.forEach(system => {
+        const material = system.material as THREE.ShaderMaterial;
+        material.uniforms.time.value = time;
+
+        // Animate particles based on their type
+        const positions = system.geometry.attributes.position.array as Float32Array;
+        const originalPositions = system.userData.originalPositions;
+        const speed = system.userData.speed;
+
+        for (let i = 0; i < positions.length; i += 3) {
+          // Gentle floating motion
+          positions[i + 1] = originalPositions[i + 1] + Math.sin(time * speed + i * 0.1) * 0.1;
+
+          // For fire particles, add more chaotic motion
+          if (element === GameElement.FIRE) {
+            positions[i] = originalPositions[i] + Math.sin(time * speed * 2 + i * 0.2) * 0.05;
+            positions[i + 2] = originalPositions[i + 2] + Math.cos(time * speed * 1.5 + i * 0.15) * 0.05;
+          }
+        }
+
+        system.geometry.attributes.position.needsUpdate = true;
+      });
+    });
+
+    // Animate fire lights with flickering
+    fireLights.forEach((light, index) => {
+      const baseIntensity = 0.8;
+      const flicker = Math.sin(time * 8 + index) * 0.2 + Math.sin(time * 12 + index * 2) * 0.1;
+      light.intensity = baseIntensity + flicker;
+    });
+  }
+
+  function getElementColor(element: GameElement): number {
+    switch (element) {
+      case GameElement.GRASS:
+        return 0x008000; // Green
+      case GameElement.WATER:
+        return 0x0000FF; // Blue
+      case GameElement.FIRE:
+        return 0xFF4500; // Orange-Red
+      case GameElement.PLAYER_START:
+        return 0xFFFF00; // Yellow
+      case GameElement.DANGER:
+        return 0xFF0000; // Red
+      default:
+        return 0xFFFFFF; // White fallback
+    }
   }
 
   function getSpritePath(element: GameElement): string | null {
@@ -404,6 +660,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
         return 'sprites/door.png';
       case GameElement.STAIRS:
         return 'sprites/stairs.png';
+      case GameElement.FIRE:
+        return 'sprites/blade.png'; // Use blade sprite for fire
+      case GameElement.GRASS:
+        return null; // Will create colored quad instead
+      case GameElement.WATER:
+        return null; // Will create colored quad instead
+      case GameElement.PLAYER_START:
+        return null; // Will create colored quad instead
       default:
         return null;
     }
@@ -798,9 +1062,26 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     updatePlayer();
     updateDebugVisualization();
+    updateSpriteAnimations();
+    updateParticleEffects();
     renderer.render(scene, camera);
 
     animationId = requestAnimationFrame(gameLoop);
+  }
+
+  function updateSpriteAnimations(): void {
+    // Animate interactive elements with subtle floating motion
+    const time = Date.now() * 0.001; // Convert to seconds
+
+    scene.children.forEach(child => {
+      if (child.userData && child.userData.originalY !== undefined && (child as any).animate) {
+        const originalY = child.userData.originalY;
+        const amplitude = 0.05; // Subtle floating amplitude
+        const frequency = 2.0; // Floating speed
+
+        child.position.y = originalY + Math.sin(time * frequency) * amplitude;
+      }
+    });
   }
 
   // Input handling

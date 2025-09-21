@@ -2,6 +2,7 @@ import { buildDomTree } from "../util";
 import { IComponent } from "./component";
 import { inputGroup } from "./common";
 import { IWfcOptions } from "../wfc/run";
+import { DEFAULT_COLOR_MAPPINGS, getElementProperties, GameElement } from "../colorMapping";
 
 export type DrawingTool = 'pen' | 'eraser' | 'rectangle' | 'circle' | 'line' | 'spray' | 'bucket';
 
@@ -22,6 +23,7 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
     clear: () => {
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      saveCanvasState();
     }
   };
 
@@ -36,6 +38,138 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
   let startY = 0;
   let canvasSize = 32;
   let scaleFactor = 16; // Display scale - increased for better pixel visibility
+
+  // Undo functionality
+  let canvasHistory: ImageData[] = [];
+  let historyIndex = -1;
+  const maxHistory = 50; // Maximum undo steps
+
+  // Action colors palette
+  const actionColorsContainer = document.createElement("div");
+  actionColorsContainer.className = "actionColorsContainer";
+  actionColorsContainer.style.display = "flex";
+  actionColorsContainer.style.flexWrap = "wrap";
+  actionColorsContainer.style.gap = "4px";
+  actionColorsContainer.style.marginBottom = "10px";
+  actionColorsContainer.style.padding = "8px";
+  actionColorsContainer.style.backgroundColor = "#f5f5f5";
+  actionColorsContainer.style.borderRadius = "4px";
+
+  const actionColorsTitle = document.createElement("div");
+  actionColorsTitle.textContent = "Action Colors (click to select):";
+  actionColorsTitle.style.fontSize = "12px";
+  actionColorsTitle.style.fontWeight = "bold";
+  actionColorsTitle.style.marginBottom = "6px";
+  actionColorsTitle.style.width = "100%";
+
+  actionColorsContainer.appendChild(actionColorsTitle);
+
+  // Create color buttons for functional elements
+  const actionColors = [
+    { color: '#000000', element: GameElement.WALL, name: 'Wall' },
+    { color: '#FF0000', element: GameElement.DANGER, name: 'Danger' },
+    { color: '#0000FF', element: GameElement.WATER, name: 'Water' },
+    { color: '#800080', element: GameElement.ENEMY, name: 'Enemy' },
+    { color: '#008000', element: GameElement.GRASS, name: 'Grass' },
+    { color: '#FFA500', element: GameElement.FIRE, name: 'Fire' },
+    { color: '#006400', element: GameElement.PLAYER_START, name: 'Start' },
+    { color: '#8B0000', element: GameElement.PLAYER_FINISH, name: 'Finish' },
+    { color: '#FFFF00', element: GameElement.TREASURE, name: 'Treasure' },
+    { color: '#FFD700', element: GameElement.KEY, name: 'Key' },
+    { color: '#8B4513', element: GameElement.DOOR, name: 'Door' },
+    { color: '#C0C0C0', element: GameElement.STAIRS, name: 'Stairs' },
+    { color: '#FFFFFF', element: GameElement.FLOOR, name: 'Floor' },
+  ];
+
+  actionColors.forEach(({ color, element, name }) => {
+    const colorButton = document.createElement("button");
+    colorButton.className = "actionColorButton";
+    colorButton.style.width = "60px";
+    colorButton.style.height = "40px";
+    colorButton.style.border = "2px solid #ccc";
+    colorButton.style.borderRadius = "4px";
+    colorButton.style.cursor = "pointer";
+    colorButton.style.backgroundColor = color;
+    colorButton.style.display = "flex";
+    colorButton.style.flexDirection = "column";
+    colorButton.style.alignItems = "center";
+    colorButton.style.justifyContent = "center";
+    colorButton.style.fontSize = "9px";
+    colorButton.style.fontWeight = "bold";
+    colorButton.style.color = getContrastColor(color);
+    colorButton.style.textShadow = "0 0 2px rgba(255,255,255,0.8)";
+    colorButton.style.position = "relative";
+
+    // Add border for white color to make it visible
+    if (color === '#FFFFFF') {
+      colorButton.style.border = "2px solid #333";
+      colorButton.style.boxShadow = "inset 0 0 0 1px #333";
+    }
+
+    // Add tooltip with full name
+    colorButton.title = `${name} (${color})`;
+
+    // Add element properties indicator
+    const props = getElementProperties(element);
+    const indicators = [];
+    if (!props.walkable) indicators.push('🚫');
+    if (props.dangerous) indicators.push('⚠️');
+    if (props.collectible) indicators.push('💎');
+    if (props.interactive) indicators.push('🎯');
+
+    const indicatorText = indicators.join('');
+    if (indicatorText) {
+      const indicator = document.createElement("span");
+      indicator.textContent = indicatorText;
+      indicator.style.fontSize = "8px";
+      indicator.style.position = "absolute";
+      indicator.style.top = "2px";
+      indicator.style.right = "2px";
+      colorButton.appendChild(indicator);
+    }
+
+    // Shortened name for button
+    const shortName = name.length > 6 ? name.substring(0, 6) : name;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = shortName;
+    colorButton.appendChild(nameSpan);
+
+    // Click handler
+    colorButton.onclick = () => {
+      currentColor = color;
+      colorInput.value = color;
+
+      // Add visual feedback
+      colorButton.style.transform = "scale(0.95)";
+      setTimeout(() => {
+        colorButton.style.transform = "scale(1)";
+      }, 100);
+    };
+
+    // Hover effects
+    colorButton.onmouseenter = () => {
+      colorButton.style.transform = "scale(1.05)";
+      colorButton.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
+    };
+
+    colorButton.onmouseleave = () => {
+      colorButton.style.transform = "scale(1)";
+      colorButton.style.boxShadow = "none";
+    };
+
+    actionColorsContainer.appendChild(colorButton);
+  });
+
+  // Helper function to get contrasting text color
+  function getContrastColor(bgColor: string): string {
+    // Simple contrast calculation - return white for dark colors, black for light
+    const hex = bgColor.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 128 ? '#000000' : '#FFFFFF';
+  }
 
   // Create canvas
   const canvas = document.createElement("canvas");
@@ -112,6 +246,15 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
     component.clear();
   };
 
+  // Undo button
+  const undoButton = document.createElement("input");
+  undoButton.type = "button";
+  undoButton.value = "Undo";
+  undoButton.disabled = true;
+  undoButton.onclick = () => {
+    undo();
+  };
+
   // Use drawing button
   const useDrawingButton = document.createElement("input");
   useDrawingButton.type = "button";
@@ -125,12 +268,14 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
 
   // Helper functions
   function updateCanvasSize() {
+    canvasSize = parseInt(sizeSelect.value);
     canvas.width = canvasSize;
     canvas.height = canvasSize;
     canvas.style.width = `${canvasSize * scaleFactor}px`;
     canvas.style.height = `${canvasSize * scaleFactor}px`;
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    saveCanvasState(); // Save state after resize
   }
 
   function getCanvasCoordinates(e: MouseEvent) {
@@ -142,6 +287,38 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
       y: (e.clientY - rect.top) * scaleY
     };
   }
+
+  function saveCanvasState() {
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Remove any history after current index (when user draws after undoing)
+    canvasHistory = canvasHistory.slice(0, historyIndex + 1);
+
+    // Add new state
+    canvasHistory.push(imageData);
+
+    // Keep only the last maxHistory states
+    if (canvasHistory.length > maxHistory) {
+      canvasHistory.shift();
+    } else {
+      historyIndex++;
+    }
+
+    // Enable undo button if we have history
+    undoButton.disabled = historyIndex <= 0;
+  }
+
+  function undo() {
+    if (historyIndex > 0) {
+      historyIndex--;
+      const previousState = canvasHistory[historyIndex];
+      ctx.putImageData(previousState, 0, 0);
+      undoButton.disabled = historyIndex <= 0;
+    }
+  }
+
+  // Initialize canvas history with blank state
+  saveCanvasState();
 
   // Drawing functions
   function startDrawing(e: MouseEvent) {
@@ -160,6 +337,7 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
     } else if (currentTool === 'bucket') {
       // For bucket tool, fill immediately on click
       floodFill(Math.floor(coords.x), Math.floor(coords.y), currentColor);
+      saveCanvasState();
       isDrawing = false;
     }
   }
@@ -223,6 +401,9 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
         drawLine(startX, startY, x, y);
         break;
     }
+
+    // Save canvas state after drawing
+    saveCanvasState();
   }
 
   function sprayPaint(x: number, y: number) {
@@ -346,6 +527,7 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
     document.createElement("p"), [
       "Create a custom image for wave function collapse. Draw simple patterns with distinct colors."
     ],
+    actionColorsContainer,
     inputGroup(), [
       document.createElement("label"), ["Canvas Size: ", sizeSelect],
       document.createElement("label"), ["Tool: ", toolSelect],
@@ -354,6 +536,7 @@ export function createDrawingCanvas(): IComponentDrawingCanvas {
     ],
     inputGroup(), [
       clearButton,
+      undoButton,
       useDrawingButton,
     ],
     canvas,
