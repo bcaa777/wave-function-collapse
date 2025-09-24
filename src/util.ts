@@ -16,7 +16,16 @@ export function buildDomTree(parent: Node, children: Array<domChild | domChild[]
         console.warn("buildDomTree: Invalid argument format. Array must follow a Node");
       }
     } else {
-      parent.appendChild(child instanceof Node ? child : document.createTextNode(child.toString()));
+      if (child instanceof Node) {
+        // Prevent HierarchyRequestError: do not append a node into one of its ancestors
+        if (child.contains(parent)) {
+          console.error('buildDomTree: Refusing to append a node into one of its ancestors. Skipping.');
+          continue;
+        }
+        parent.appendChild(child);
+      } else {
+        parent.appendChild(document.createTextNode(child.toString()));
+      }
     }
   }
 

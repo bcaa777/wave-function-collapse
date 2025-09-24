@@ -332,7 +332,7 @@ gameModeTab.onclick = () => switchMode(AppMode.DUNGEON_CRAWLER);
 // Initialize the application
 const mainElem = document.querySelector("main");
 if (mainElem) {
-  const content = buildDomTree(
+  buildDomTree(
     mainElem, [
       document.createElement("h2"), ["Wave Function Collapse Dungeon Generator"],
       modeTabContainer, [
@@ -344,7 +344,6 @@ if (mainElem) {
       contentContainer,
     ],
   );
-  mainElem.appendChild(content);
 
   // Start with input mode
   switchMode(AppMode.INPUT);

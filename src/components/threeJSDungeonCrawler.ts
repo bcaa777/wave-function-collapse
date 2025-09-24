@@ -60,6 +60,16 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   let renderer: THREE.WebGLRenderer;
   let animationId: number;
 
+  // Postprocessing render targets and quad
+  let postRenderTarget: any;
+  let postScene: any;
+  let postCamera: any;
+  let postMaterial: any;
+  let usePostprocessing = true;
+  let postHud: HTMLDivElement | null = null;
+  let postControls: HTMLDivElement | null = null;
+  let paletteSelect: HTMLSelectElement | null = null;
+
   // Game state
   let currentGameMap: GameElement[][] = [];
   let enemies: Enemy[] = [];
@@ -77,13 +87,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   };
 
   // Game constants
-  const BASE_WIDTH = 480;
-  const BASE_HEIGHT = 320;
-  const SCALE_FACTOR = 2; // Upscale to 960x640
+  const BASE_WIDTH = 240;
+  const BASE_HEIGHT = 160;
+  const SCALE_FACTOR = 1; // Upscale to 960x640
+  const DISPLAY_SCALE = 4; // final on-screen scale (crisp, nearest)
   const WALL_HEIGHT = 2.0;
   const MOVE_SPEED = 0.05;
   const ROTATE_SPEED = 0.03;
-  const PLAYER_COLLISION_RADIUS = 0.25; // Player collision radius - increased for better spacing from wall textures
+  const PLAYER_COLLISION_RADIUS = 0.18; // Reduced for smoother movement in tight corridors
 
   // Input state
   const keysPressed: Set<string> = new Set();
@@ -103,6 +114,13 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   // Particle system variables
   let particleSystems: Map<GameElement, THREE.Points[]> = new Map();
   let fireLights: THREE.PointLight[] = [];
+  const glowSprites: THREE.Sprite[] = [];
+
+  // Visibility/occlusion data
+  const VISIBILITY_RADIUS = 10;
+  let visibilityFrameCounter = 0;
+  const VISIBILITY_UPDATE_INTERVAL = 2; // Update every 2 frames
+  const wallMeshMap: Map<string, THREE.Mesh> = new Map();
 
   async function initializeGame(gameMap: GameElement[][], playerStart: { x: number; y: number }): Promise<void> {
     currentGameMap = gameMap;
@@ -131,13 +149,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       return;
     }
 
-    // THREE is already declared globally
-
     // Initialize Three.js scene
     await setupThreeJS();
 
     // Create the dungeon geometry
     createDungeon();
+
+    // In case the spawn is blocked, relocate to nearest walkable tile
+    ensureSpawnAccessible();
 
     // Setup input event listeners
     setupInputListeners();
@@ -149,20 +168,35 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   async function setupThreeJS(): Promise<void> {
     // Create scene
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a2a); // Dark blue background
+    scene.background = new THREE.Color(0x202030);
 
     // Create camera
     camera = new THREE.PerspectiveCamera(75, BASE_WIDTH / BASE_HEIGHT, 0.1, 1000);
+    camera.far = 21; // near the 20m fog distance to avoid popping
+    camera.updateProjectionMatrix();
     camera.position.set(player.x, 1, player.y);
     camera.lookAt(player.x + Math.cos(player.angle), 1, player.y + Math.sin(player.angle));
 
     // Create renderer with upscaling
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(BASE_WIDTH * SCALE_FACTOR, BASE_HEIGHT * SCALE_FACTOR);
-    renderer.domElement.style.width = `${BASE_WIDTH * SCALE_FACTOR}px`;
-    renderer.domElement.style.height = `${BASE_HEIGHT * SCALE_FACTOR}px`;
+    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    renderer.setSize(BASE_WIDTH, BASE_HEIGHT);
+    renderer.domElement.style.width = `${BASE_WIDTH * DISPLAY_SCALE}px`;
+    renderer.domElement.style.height = `${BASE_HEIGHT * DISPLAY_SCALE}px`;
     renderer.domElement.style.imageRendering = 'pixelated';
-    renderer.setPixelRatio(window.devicePixelRatio);
+    (renderer.domElement.style as any)['imageRendering'] = 'pixelated';
+    renderer.domElement.style.setProperty('image-rendering', 'pixelated');
+    renderer.domElement.style.setProperty('image-rendering', 'crisp-edges');
+    renderer.setPixelRatio(1);
+
+    // Modern color and tone mapping
+    if ((renderer as any).outputColorSpace !== undefined) {
+      (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
+    } else if ((renderer as any).outputEncoding !== undefined) {
+      (renderer as any).outputEncoding = THREE.sRGBEncoding;
+    }
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    renderer.useLegacyLights = false;
 
     // Advanced lighting system
     setupLighting();
@@ -173,28 +207,226 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     // Add renderer to DOM
     component.domElement.appendChild(renderer.domElement);
+    (component.domElement as HTMLElement).style.display = 'inline-block';
+    (component.domElement as HTMLElement).style.lineHeight = '0';
+
+    // Create low-res render target for pixel-art upscale
+    postRenderTarget = new THREE.WebGLRenderTarget(BASE_WIDTH, BASE_HEIGHT, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      depthBuffer: true,
+      stencilBuffer: false
+    });
+
+    // Fullscreen quad and shader
+    postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    postScene = new THREE.Scene();
+
+    postMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: postRenderTarget.texture },
+        resolution: { value: new THREE.Vector2(BASE_WIDTH, BASE_HEIGHT) },
+        time: { value: 0 },
+        saturation: { value: 1.25 },
+        contrast: { value: 1.1 },
+        vignette: { value: 0.2 },
+        bloomStrength: { value: 0.6 },
+        bloomThreshold: { value: 0.7 },
+        ditherAmount: { value: 0.02 },
+        paletteMode: { value: 0 }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform sampler2D tDiffuse;
+        uniform vec2 resolution;
+        uniform float time;
+        uniform float saturation;
+        uniform float contrast;
+        uniform float vignette;
+        uniform float bloomStrength;
+        uniform float bloomThreshold;
+        uniform float ditherAmount;
+        uniform int paletteMode; // 0 None, 1 GameBoy, 2 CRT, 3 Retro16
+
+        // Bayer 4x4 matrix for ordered dithering
+        float bayer(vec2 uv) {
+          int x = int(mod(floor(uv.x), 4.0));
+          int y = int(mod(floor(uv.y), 4.0));
+          int index = x + y * 4;
+          int mat[16];
+          mat[0]=0; mat[1]=8; mat[2]=2; mat[3]=10;
+          mat[4]=12; mat[5]=4; mat[6]=14; mat[7]=6;
+          mat[8]=3; mat[9]=11; mat[10]=1; mat[11]=9;
+          mat[12]=15; mat[13]=7; mat[14]=13; mat[15]=5;
+          return float(mat[index]) / 16.0;
+        }
+
+        vec3 saturateColor(vec3 color, float s) {
+          float l = dot(color, vec3(0.2126, 0.7152, 0.0722));
+          return mix(vec3(l), color, s);
+        }
+
+        vec3 applyPalette(vec3 c) {
+          if (paletteMode == 0) return c;
+          if (paletteMode == 1) {
+            // Game Boy 4-color palette
+            vec3 p0 = vec3(0.055, 0.094, 0.071);
+            vec3 p1 = vec3(0.214, 0.353, 0.235);
+            vec3 p2 = vec3(0.494, 0.706, 0.400);
+            vec3 p3 = vec3(0.800, 0.949, 0.565);
+            float g = dot(c, vec3(0.299, 0.587, 0.114));
+            if (g < 0.25) return p0; else if (g < 0.5) return p1; else if (g < 0.75) return p2; else return p3;
+          }
+          if (paletteMode == 2) {
+            // CRT-ish: slight scanline and phosphor tint
+            float scan = 0.08 * sin(vUv.y * resolution.y * 3.14159);
+            c *= 1.0 - scan;
+            c *= vec3(1.05, 1.0, 1.1);
+            return clamp(c, 0.0, 1.0);
+          }
+          if (paletteMode == 3) {
+            // 16-color retro quantization (simple)
+            vec3 pal[16];
+            pal[0]=vec3(0.0,0.0,0.0); pal[1]=vec3(0.2,0.2,0.2); pal[2]=vec3(0.4,0.4,0.4); pal[3]=vec3(0.6,0.6,0.6);
+            pal[4]=vec3(0.8,0.8,0.8); pal[5]=vec3(1.0,1.0,1.0); pal[6]=vec3(1.0,0.0,0.0); pal[7]=vec3(0.0,1.0,0.0);
+            pal[8]=vec3(0.0,0.0,1.0); pal[9]=vec3(1.0,1.0,0.0); pal[10]=vec3(1.0,0.0,1.0); pal[11]=vec3(0.0,1.0,1.0);
+            pal[12]=vec3(1.0,0.5,0.0); pal[13]=vec3(0.5,0.0,1.0); pal[14]=vec3(0.2,0.9,0.9); pal[15]=vec3(0.9,0.2,0.6);
+            float best = 1e9; int bi = 0;
+            for (int i=0;i<16;i++) {
+              float d = dot(c - pal[i], c - pal[i]);
+              if (d < best) { best = d; bi = i; }
+            }
+            return pal[bi];
+          }
+          return c;
+        }
+
+        void main() {
+          vec2 texel = 1.0 / resolution;
+          // Snap UVs to texel grid for crisp pixels
+          vec2 snappedUv = (floor(vUv * resolution) + 0.5) * texel;
+          vec4 base = texture2D(tDiffuse, snappedUv);
+
+          // Simple bright-pass and small-kernel bloom
+          vec3 c = base.rgb;
+          float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          vec3 bright = max(c - bloomThreshold, 0.0);
+          vec3 blur = (
+            texture2D(tDiffuse, snappedUv + vec2(texel.x, 0.0)).rgb +
+            texture2D(tDiffuse, snappedUv + vec2(-texel.x, 0.0)).rgb +
+            texture2D(tDiffuse, snappedUv + vec2(0.0, texel.y)).rgb +
+            texture2D(tDiffuse, snappedUv + vec2(0.0, -texel.y)).rgb
+          ) * 0.25;
+          vec3 bloom = bright * blur * bloomStrength;
+          c += bloom;
+
+          // Vibrancy
+          c = saturateColor(c, saturation);
+          c = (c - 0.5) * contrast + 0.5;
+
+          // Palette
+          c = applyPalette(c);
+
+          // Vignette
+          float dist = distance(vUv, vec2(0.5));
+          float vig = 1.0 - smoothstep(0.6, 1.0, dist);
+          c *= mix(1.0, vig, vignette);
+
+          // Ordered dithering
+          float d = bayer(vUv * resolution) - 0.5;
+          c += ditherAmount * d;
+
+          gl_FragColor = vec4(c, 1.0);
+        }
+      `,
+      depthTest: false,
+      depthWrite: false
+    });
+
+    const postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMaterial);
+    postScene.add(postQuad);
+
+    // Palette hotkeys: 1 None, 2 GameBoy, 3 CRT, 4 Retro16
+    window.addEventListener('keydown', (ev: KeyboardEvent) => {
+      const k = (ev.key || '').toLowerCase();
+      if (k === '1' && postMaterial) postMaterial.uniforms.paletteMode.value = 0;
+      if (k === '2' && postMaterial) postMaterial.uniforms.paletteMode.value = 1;
+      if (k === '3' && postMaterial) postMaterial.uniforms.paletteMode.value = 2;
+      if (k === '4' && postMaterial) postMaterial.uniforms.paletteMode.value = 3;
+      if (k === 'p') usePostprocessing = !usePostprocessing;
+      updatePostHud();
+    });
+
+    // HUD overlay to show post status and palette
+    postHud = document.createElement('div');
+    postHud.style.cssText = 'position:absolute; top:6px; right:8px; padding:4px 6px; background:rgba(0,0,0,0.5); color:#fff; font:12px monospace; border-radius:3px; z-index: 9999;';
+    (component.domElement as HTMLElement).style.position = 'relative';
+    component.domElement.appendChild(postHud);
+
+    // On-screen controls (guaranteed toggles)
+    postControls = document.createElement('div');
+    postControls.style.cssText = 'position:absolute; top:6px; left:8px; display:flex; gap:6px; align-items:center; z-index: 10000; background:rgba(0,0,0,0.35); padding:4px 6px; border-radius:3px;';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = 'Toggle Post';
+    toggleBtn.style.cssText = 'font:12px monospace; cursor:pointer;';
+    toggleBtn.onclick = (e) => { e.stopPropagation(); usePostprocessing = !usePostprocessing; updatePostHud(); };
+
+    paletteSelect = document.createElement('select');
+    paletteSelect.style.cssText = 'font:12px monospace;';
+    ;['None','GameBoy','CRT','Retro16'].forEach((label, idx) => {
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.text = label;
+      paletteSelect!.appendChild(opt);
+    });
+    paletteSelect.onchange = (e) => {
+      const v = parseInt((e.target as HTMLSelectElement).value, 10) | 0;
+      if (postMaterial) postMaterial.uniforms.paletteMode.value = v;
+      updatePostHud();
+    };
+
+    postControls.appendChild(toggleBtn);
+    postControls.appendChild(paletteSelect);
+    component.domElement.appendChild(postControls);
+
+    updatePostHud();
   }
 
   function setupLighting(): void {
-    // Player torch light (follows player) - now the only light source
-    const playerTorch = new THREE.PointLight(0xffaa44, 2.0, 12);
+    // Ambient and hemisphere fill for general visibility
+    const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x404040, 0.6);
+    scene.add(hemi);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+    scene.add(ambient);
+
+    // Player torch light (follows player)
+    const playerTorch = new THREE.PointLight(0xffc866, 2.2, 18);
     playerTorch.position.set(player.x, 1.5, player.y);
     playerTorch.castShadow = true;
 
-    // Enhanced shadow settings for hard shadows
+    // Enhanced shadow settings
     playerTorch.shadow.mapSize.width = 2048;
     playerTorch.shadow.mapSize.height = 2048;
     playerTorch.shadow.camera.near = 0.1;
-    playerTorch.shadow.camera.far = 15;
-    playerTorch.shadow.bias = -0.0001; // Reduces shadow acne
+    playerTorch.shadow.camera.far = 24;
+    playerTorch.shadow.bias = -0.0002;
 
     scene.add(playerTorch);
 
     // Store reference to player torch for updates
     (scene as any).playerTorch = playerTorch;
 
-    // Add atmospheric fog (darker since we have less light)
-    scene.fog = new THREE.Fog(0x000000, 3, 20);
+    // Softer, farther fog so the scene is not too dark
+    scene.fog = new THREE.Fog(0x202030, 8, 20);
   }
 
   function createDungeon(): void {
@@ -215,6 +447,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     // Initialize debug visualization
     createDebugSpheres();
+
+    // Initial visibility update to prevent overdraw on first frames
+    updateVisibility();
   }
 
   function createFloor(width: number, height: number): void {
@@ -226,17 +461,29 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     floorTexture.wrapS = THREE.RepeatWrapping;
     floorTexture.wrapT = THREE.RepeatWrapping;
     floorTexture.repeat.set(width / 4, height / 4);
+    // Improve texture quality and color accuracy
+    if ((floorTexture as any).colorSpace !== undefined) {
+      (floorTexture as any).colorSpace = THREE.SRGBColorSpace;
+    } else if ((floorTexture as any).encoding !== undefined) {
+      (floorTexture as any).encoding = THREE.sRGBEncoding;
+    }
+    if (renderer && renderer.capabilities && renderer.capabilities.getMaxAnisotropy) {
+      floorTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
 
-    const floorMaterial = new THREE.MeshLambertMaterial({
+    const floorMaterial = new THREE.MeshStandardMaterial({
       map: floorTexture,
-      transparent: true,
-      opacity: 0.9
+      roughness: 0.95,
+      metalness: 0.0,
+      emissive: new THREE.Color(0x1a1a1a),
+      emissiveIntensity: 0.08
     });
 
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(width / 2 - 0.5, 0, height / 2 - 0.5);
     floor.receiveShadow = true;
+    floor.frustumCulled = false; // ensure floor remains visible with short far plane
     scene.add(floor);
 
     // Create ceiling
@@ -252,17 +499,28 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     ceilingTexture.wrapS = THREE.RepeatWrapping;
     ceilingTexture.wrapT = THREE.RepeatWrapping;
     ceilingTexture.repeat.set(width / 4, height / 4);
+    if ((ceilingTexture as any).colorSpace !== undefined) {
+      (ceilingTexture as any).colorSpace = THREE.SRGBColorSpace;
+    } else if ((ceilingTexture as any).encoding !== undefined) {
+      (ceilingTexture as any).encoding = THREE.sRGBEncoding;
+    }
+    if (renderer && renderer.capabilities && renderer.capabilities.getMaxAnisotropy) {
+      ceilingTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
 
-    const ceilingMaterial = new THREE.MeshLambertMaterial({
+    const ceilingMaterial = new THREE.MeshStandardMaterial({
       map: ceilingTexture,
-      transparent: true,
-      opacity: 0.8
+      roughness: 0.98,
+      metalness: 0.0,
+      emissive: new THREE.Color(0x0e0e12),
+      emissiveIntensity: 0.06
     });
 
     const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
     ceiling.rotation.x = Math.PI / 2; // Rotate to face down
     ceiling.position.set(width / 2 - 0.5, WALL_HEIGHT, height / 2 - 0.5);
     ceiling.receiveShadow = true;
+    ceiling.frustumCulled = false; // ensure ceiling remains visible
     scene.add(ceiling);
   }
 
@@ -287,28 +545,25 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     // Create material array for all 6 faces of the cube to ensure consistent texturing
     const wallTexture = getWallTexture(element);
+    const baseMatParams = { map: wallTexture, roughness: 0.9, metalness: 0.0, emissive: new THREE.Color(0x121820), emissiveIntensity: 0.1 };
     const wallMaterial = [
-      new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Right face (+X)
-      new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Left face (-X)
-      new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Top face (+Y)
-      new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Bottom face (-Y)
-      new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false }), // Front face (+Z)
-      new THREE.MeshLambertMaterial({ map: wallTexture.clone(), transparent: false })  // Back face (-Z)
+      new THREE.MeshStandardMaterial(baseMatParams),
+      new THREE.MeshStandardMaterial(baseMatParams),
+      new THREE.MeshStandardMaterial(baseMatParams),
+      new THREE.MeshStandardMaterial(baseMatParams),
+      new THREE.MeshStandardMaterial(baseMatParams),
+      new THREE.MeshStandardMaterial(baseMatParams)
     ];
 
     const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-    // Position wall at grid coordinates (x, y) - this centers the wall at (x, WALL_HEIGHT/2, y)
-    // The wall will occupy space from (x-0.5, 0, y-0.5) to (x+0.5, WALL_HEIGHT, y+0.5)
+    // Position wall at grid coordinates (x, y)
     wall.position.set(x, WALL_HEIGHT / 2, y);
     wall.castShadow = true;
     wall.receiveShadow = true;
-    // Ensure consistent orientation
     wall.rotation.y = 0;
 
-    // Add a name for debugging
     wall.name = `wall_${x}_${y}`;
 
-    // DEBUG: Add wireframe to visualize wall boundaries
     if (debugMode) {
       const wireframeGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
       const wireframeMaterial = new THREE.MeshBasicMaterial({
@@ -324,6 +579,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     }
 
     scene.add(wall);
+
+    // Track wall for occlusion/visibility control
+    wallMeshMap.set(`${x},${y}`, wall);
 
     // DEBUG: Log wall creation for debugging
     if (debugMode) {
@@ -354,10 +612,18 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(1, 1);
-    // Ensure texture is properly oriented and doesn't have artifacts
-    texture.generateMipmaps = false;
-    texture.minFilter = THREE.LinearFilter;
+    // Improve color and sampling for readability
+    if ((texture as any).colorSpace !== undefined) {
+      (texture as any).colorSpace = THREE.SRGBColorSpace;
+    } else if ((texture as any).encoding !== undefined) {
+      (texture as any).encoding = THREE.sRGBEncoding;
+    }
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
+    if (renderer && renderer.capabilities && renderer.capabilities.getMaxAnisotropy) {
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
     return texture;
   }
 
@@ -383,12 +649,34 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       const texture = textureLoader.load(spritePath);
       const spriteMaterial = new THREE.SpriteMaterial({
         map: texture,
-        transparent: true
+        transparent: true,
+        fog: true
       });
       const sprite = new THREE.Sprite(spriteMaterial);
       sprite.position.set(x, 1, y);
       sprite.scale.set(0.8, 0.8, 0.8);
       scene.add(sprite);
+
+      // Add emissive glow for certain elements
+      if (element === GameElement.FIRE || element === GameElement.TREASURE) {
+        const glowColor = element === GameElement.FIRE ? 0xffa200 : 0xffee66;
+        const glowTex = textureLoader.load('sprites/treasure.png');
+        const glowMat = new THREE.SpriteMaterial({
+          map: glowTex,
+          color: glowColor,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: true,
+          opacity: 0.8
+        });
+        const glow = new THREE.Sprite(glowMat);
+        glow.position.set(x, 1, y);
+        glow.scale.set(1.1, 1.1, 1.1);
+        (glow as any).pulse = true;
+        scene.add(glow);
+        glowSprites.push(glow);
+      }
     } else {
       // Create colored quad for elements without sprites
       createColoredQuad(x, y, element);
@@ -402,7 +690,8 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       color: getElementColor(element),
       transparent: true,
       opacity: 0.7,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      fog: true
     });
 
     const quad = new THREE.Mesh(geometry, material);
@@ -502,7 +791,8 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mvPosition;
-          gl_PointSize = size * pixelRatio * (300.0 / -mvPosition.z);
+          float computedSize = size * pixelRatio * (300.0 / max(0.1, -mvPosition.z));
+          gl_PointSize = min(computedSize, 64.0);
         }
       `,
       fragmentShader: `
@@ -570,20 +860,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
           spread: 0.7
         };
       case GameElement.PLAYER_START:
-        return {
-          count: 5,
-          color: 0xffff88, // Light yellow
-          size: 2,
-          speed: 0.8,
-          spread: 0.3
-        };
+        return null; // Disable particles at player start to avoid huge near-camera points
       default:
         return null;
     }
   }
 
   function createFireLight(x: number, y: number): void {
-    const fireLight = new THREE.PointLight(0xffaa44, 0.8, 6);
+    const fireLight = new THREE.PointLight(0xffaa44, 0.7, 7);
     fireLight.position.set(x, 0.8, y);
     fireLight.castShadow = false; // Don't cast shadows to avoid performance issues
 
@@ -748,9 +1032,12 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     const lookZ = player.y + Math.sin(player.angle) * 2;
     camera.lookAt(lookX, 1, lookZ);
 
-    // Update player torch position
+    // Update player torch position and add subtle flicker
     if ((scene as any).playerTorch) {
-      (scene as any).playerTorch.position.set(player.x, 1.5, player.y);
+      const torch = (scene as any).playerTorch as any;
+      torch.position.set(player.x, 1.5, player.y);
+      const t = Date.now() * 0.002;
+      torch.intensity = 2.0 + Math.sin(t * 3.2) * 0.2 + Math.sin(t * 5.7) * 0.1;
     }
   }
 
@@ -835,7 +1122,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
           // Use strict inequalities to avoid edge case issues
           // Allow a tiny tolerance for floating point precision
-          const tolerance = 0.001;
+          const tolerance = 0.02; // Relaxed tolerance so corridors don't block movement
           if (point.x > wallMinX + tolerance && point.x < wallMaxX - tolerance &&
               point.y > wallMinY + tolerance && point.y < wallMaxY - tolerance) {
             // Debug logging for collision detection
@@ -843,7 +1130,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
               console.log(`🔴 COLLISION: ${point.name} point (${point.x.toFixed(3)}, ${point.y.toFixed(3)}) inside wall at cell (${cell.x}, ${cell.y})`);
               console.log(`   Wall bounds: X[${wallMinX.toFixed(3)}, ${wallMaxX.toFixed(3)}] Y[${wallMinY.toFixed(3)}, ${wallMaxY.toFixed(3)}]`);
               console.log(`   Player position: (${player.x.toFixed(3)}, ${player.y.toFixed(3)})`);
-              console.log(`   Distance from player: dx=${(point.x - player.x).toFixed(3)}, dy=${(point.y - player.y).toFixed(3)}`);
+              console.log(`   Distance from player: dx=${(point.x - player.x).toFixed(3)}, dy=${(point.y - player.y).toFixed(3)})`);
             }
             return false;
           }
@@ -1064,7 +1351,22 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     updateDebugVisualization();
     updateSpriteAnimations();
     updateParticleEffects();
-    renderer.render(scene, camera);
+
+    if (usePostprocessing && postRenderTarget && postMaterial) {
+      // Render to low-res target, then upscale with post shader
+      renderer.setRenderTarget(postRenderTarget);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
+
+      // Update shader time and ensure texture is current
+      postMaterial.uniforms.time.value = Date.now() * 0.001;
+      postMaterial.uniforms.tDiffuse.value = postRenderTarget.texture;
+
+      renderer.render(postScene, postCamera);
+    } else {
+      // Fallback direct render
+      renderer.render(scene, camera);
+    }
 
     animationId = requestAnimationFrame(gameLoop);
   }
@@ -1082,15 +1384,131 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
         child.position.y = originalY + Math.sin(time * frequency) * amplitude;
       }
     });
+
+    // Pulse glow sprites
+    glowSprites.forEach((s, idx) => {
+      const base = 1.0 + Math.sin(time * 4.0 + idx) * 0.1;
+      s.scale.set(base, base, base);
+      const mat = s.material as any;
+      if (mat && mat.opacity !== undefined) {
+        mat.opacity = 0.6 + Math.sin(time * 3.5 + idx) * 0.2;
+      }
+    });
+  }
+
+  function isOccludedByWalls(targetX: number, targetY: number): boolean {
+    // DDA through grid from player to target center
+    const startX = player.x;
+    const startY = player.y;
+    const endX = targetX + 0.0; // centers are integer already
+    const endY = targetY + 0.0;
+
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy)) * 6; // higher sampling density
+    if (steps <= 0) return false;
+
+    const stepX = dx / steps;
+    const stepY = dy / steps;
+
+    let x = startX;
+    let y = startY;
+
+    for (let i = 0; i < steps; i++) {
+      x += stepX;
+      y += stepY;
+
+      const gridX = Math.floor(x);
+      const gridY = Math.floor(y);
+
+      if (gridX === targetX && gridY === targetY) {
+        return false; // reached target cell without hitting another wall
+      }
+
+      if (gridX < 0 || gridY < 0 || gridY >= currentGameMap.length || gridX >= currentGameMap[0].length) {
+        return true; // outside map considered blocked
+      }
+
+      const element = currentGameMap[gridY][gridX];
+      const properties = getElementProperties(element);
+      if (!properties.walkable) {
+        // Hit a wall before reaching target
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function updateVisibility(): void {
+    // Disabled: rely on distance fog for fading at ~20m; no manual culling
+    return;
+  }
+
+  function ensureSpawnAccessible(): void {
+    if (isValidPosition(player.x, player.y)) return;
+
+    // Search outward for first walkable tile
+    const maxRadius = 5;
+    for (let r = 1; r <= maxRadius; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const tx = Math.floor(player.x) + dx;
+          const ty = Math.floor(player.y) + dy;
+          if (ty >= 0 && ty < currentGameMap.length && tx >= 0 && tx < currentGameMap[0].length) {
+            const properties = getElementProperties(currentGameMap[ty][tx]);
+            if (properties.walkable) {
+              const nx = tx + 0.5;
+              const ny = ty + 0.5;
+              if (isValidPosition(nx, ny)) {
+                player.x = nx;
+                player.y = ny;
+                camera.position.set(player.x, 1, player.y);
+                if ((scene as any).playerTorch) {
+                  (scene as any).playerTorch.position.set(player.x, 1.5, player.y);
+                }
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // Input handling
   function handleKeyDown(e: KeyboardEvent) {
     keysPressed.add(e.code.toLowerCase());
+    const k = (e.key || '').toLowerCase();
+    switch (k) {
+      case 'w': keysPressed.add('keyw'); break;
+      case 'a': keysPressed.add('keya'); break;
+      case 's': keysPressed.add('keys'); break;
+      case 'd': keysPressed.add('keyd'); break;
+      case 'arrowup': keysPressed.add('arrowup'); break;
+      case 'arrowdown': keysPressed.add('arrowdown'); break;
+      case 'arrowleft': keysPressed.add('arrowleft'); break;
+      case 'arrowright': keysPressed.add('arrowright'); break;
+      case 'q': keysPressed.add('keyq'); break;
+      case 'e': keysPressed.add('keye'); break;
+    }
   }
 
   function handleKeyUp(e: KeyboardEvent) {
     keysPressed.delete(e.code.toLowerCase());
+    const k = (e.key || '').toLowerCase();
+    switch (k) {
+      case 'w': keysPressed.delete('keyw'); break;
+      case 'a': keysPressed.delete('keya'); break;
+      case 's': keysPressed.delete('keys'); break;
+      case 'd': keysPressed.delete('keyd'); break;
+      case 'arrowup': keysPressed.delete('arrowup'); break;
+      case 'arrowdown': keysPressed.delete('arrowdown'); break;
+      case 'arrowleft': keysPressed.delete('arrowleft'); break;
+      case 'arrowright': keysPressed.delete('arrowright'); break;
+      case 'q': keysPressed.delete('keyq'); break;
+      case 'e': keysPressed.delete('keye'); break;
+    }
   }
 
   // Mouse event handlers
@@ -1112,11 +1530,21 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
   function setupInputListeners(): void {
     // Event listeners
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     renderer.domElement.addEventListener('click', handleClick);
+  }
+
+  function updatePostHud(): void {
+    if (!postHud || !postMaterial) return;
+    const mode = postMaterial.uniforms.paletteMode.value;
+    const modeName = mode === 0 ? 'None' : mode === 1 ? 'GameBoy' : mode === 2 ? 'CRT' : 'Retro16';
+    postHud.textContent = `Post: ${usePostprocessing ? 'ON' : 'OFF'} | Palette: ${modeName} (1-4) | Toggle Post: P`;
+    if (paletteSelect) paletteSelect.value = String(mode);
   }
 
   return component;

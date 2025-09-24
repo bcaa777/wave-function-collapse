@@ -38,8 +38,8 @@
           console.log('Three.js version:', window.THREE.REVISION);
 
           // Configure SystemJS
-          if (typeof SystemJS !== 'undefined') {
-            SystemJS.set('three', SystemJS.newModule(window.THREE));
+          if (typeof System !== 'undefined' && typeof System.set === 'function') {
+            System.set('three', System.newModule(window.THREE));
           }
 
           console.log('🚀 Starting main application load sequence...');
@@ -71,14 +71,18 @@
 
     function loadMainApplication() {
       // First load SystemJS
-      if (typeof SystemJS === 'undefined') {
+      if (typeof System === 'undefined') {
         const systemJSScript = document.createElement('script');
         systemJSScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/systemjs/0.20.19/system.js';
         systemJSScript.onload = function() {
           console.log('✅ SystemJS loaded');
           console.log('🔧 Configuring SystemJS for Three.js...');
-          SystemJS.set('three', SystemJS.newModule(window.THREE));
-          console.log('✅ SystemJS configured for Three.js');
+          if (typeof System !== 'undefined' && typeof System.set === 'function') {
+            System.set('three', System.newModule(window.THREE));
+            console.log('✅ SystemJS configured for Three.js');
+          } else {
+            console.warn('SystemJS global not found as System; proceeding without mapping.');
+          }
 
           // Now load our compiled TypeScript
           loadDistJS();
@@ -88,7 +92,9 @@
         };
         document.head.appendChild(systemJSScript);
       } else {
-        SystemJS.set('three', SystemJS.newModule(window.THREE));
+        if (typeof System.set === 'function') {
+          System.set('three', System.newModule(window.THREE));
+        }
         loadDistJS();
       }
     }
@@ -100,18 +106,18 @@
       setTimeout(function() {
         // Load dist.js (contains our compiled TypeScript)
         const distScript = document.createElement('script');
-        distScript.src = 'dist.js';
+        distScript.src = 'dist.js?v=' + Date.now();
         distScript.onload = function() {
           console.log('✅ Application (dist.js) loaded successfully');
           console.log('🎯 Starting main module import...');
 
           // Give SystemJS a moment to process the loaded modules
           setTimeout(function() {
-            if (typeof SystemJS !== 'undefined') {
+            if (typeof System !== 'undefined' && typeof System.import === 'function') {
               console.log('✅ SystemJS is available, importing main module...');
 
               // Try to import the main module
-              SystemJS.import("main").then(function(module) {
+              System.import("main").then(function(module) {
                 console.log('✅ Main module loaded successfully!');
                 console.log('🎮 Application should now be running...');
               }).catch(function(err) {
