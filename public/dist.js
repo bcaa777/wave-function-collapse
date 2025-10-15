@@ -541,6 +541,7 @@ System.register("util", [], function (exports_8, context_8) {
             }
             else {
                 if (child instanceof Node) {
+                    // Prevent HierarchyRequestError: do not append a node into one of its ancestors
                     if (child.contains(parent)) {
                         console.error('buildDomTree: Refusing to append a node into one of its ancestors. Skipping.');
                         continue;
@@ -2216,10 +2217,378 @@ System.register("components/imageEditor", ["util", "components/common", "compone
         }
     };
 });
-System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (exports_20, context_20) {
+System.register("components/terrain", ["colorMapping"], function (exports_20, context_20) {
     "use strict";
     var colorMapping_3;
     var __moduleName = context_20 && context_20.id;
+    // Build a per-tile height map from the color-based game map.
+    // Units are in world meters; positive raises ground, negative lowers.
+    function buildHeightMap(gameMap) {
+        const rows = gameMap.length;
+        const cols = gameMap[0].length;
+        const heights = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        // Base assignment from element types
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                const el = gameMap[y][x];
+                let h = 0;
+                switch (el) {
+                    case colorMapping_3.GameElement.WATER:
+                        h = -0.35;
+                        break; // water basins
+                    case colorMapping_3.GameElement.GRASS:
+                        h = 0.0;
+                        break; // base, will add noise later
+                    case colorMapping_3.GameElement.DANGER:
+                        h = -0.05;
+                        break;
+                    case colorMapping_3.GameElement.FIRE:
+                        h = 0.0;
+                        break;
+                    default:
+                        h = 0.0;
+                        break;
+                }
+                heights[y][x] = h;
+            }
+        }
+        // Add gentle noise hills constrained by walls (keep walls flat)
+        const noise = createSimplexLikeNoise(1337);
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                if (gameMap[y][x] === colorMapping_3.GameElement.WALL)
+                    continue;
+                const nx = x / Math.max(1, cols);
+                const ny = y / Math.max(1, rows);
+                const n = noise(nx * 2.0, ny * 2.0) * 0.12; // amplitude
+                heights[y][x] += n;
+            }
+        }
+        // Simple smoothing pass to soften steps (excluding walls)
+        const out = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                let sum = 0;
+                let count = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const nx = x + dx, ny = y + dy;
+                        if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
+                            sum += heights[ny][nx];
+                            count++;
+                        }
+                    }
+                }
+                out[y][x] = sum / Math.max(1, count);
+            }
+        }
+        // Keep walls at 0 height for clean vertical faces
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                if (gameMap[y][x] === colorMapping_3.GameElement.WALL)
+                    out[y][x] = 0;
+            }
+        }
+        return out;
+    }
+    exports_20("buildHeightMap", buildHeightMap);
+    // Bilinear interpolation of ground height at fractional position
+    function sampleHeightBilinear(heights, x, y) {
+        const cols = heights[0].length;
+        const rows = heights.length;
+        const x0 = Math.max(0, Math.floor(x));
+        const y0 = Math.max(0, Math.floor(y));
+        const x1 = Math.min(cols - 1, x0 + 1);
+        const y1 = Math.min(rows - 1, y0 + 1);
+        const tx = Math.min(1, Math.max(0, x - x0));
+        const ty = Math.min(1, Math.max(0, y - y0));
+        const h00 = heights[y0][x0];
+        const h10 = heights[y0][x1];
+        const h01 = heights[y1][x0];
+        const h11 = heights[y1][x1];
+        const hx0 = h00 * (1 - tx) + h10 * tx;
+        const hx1 = h01 * (1 - tx) + h11 * tx;
+        return hx0 * (1 - ty) + hx1 * ty;
+    }
+    exports_20("sampleHeightBilinear", sampleHeightBilinear);
+    // Basic 2D value-noise blended to mimic simplex; deterministic per seed
+    function createSimplexLikeNoise(seed) {
+        const rand = mulberry32(seed);
+        const gradients = [];
+        for (let i = 0; i < 256; i++) {
+            const a = rand() * Math.PI * 2;
+            gradients.push([Math.cos(a), Math.sin(a)]);
+        }
+        const perm = new Uint8Array(512);
+        for (let i = 0; i < 512; i++)
+            perm[i] = (i & 255);
+        // Simple shuffle
+        for (let i = 255; i > 0; i--) {
+            const j = (rand() * (i + 1)) | 0;
+            const tmp = perm[i];
+            perm[i] = perm[j];
+            perm[j] = tmp;
+        }
+        function dot(ix, iy, x, y) {
+            const g = gradients[(perm[(ix + perm[iy & 255]) & 255])];
+            return g[0] * x + g[1] * y;
+        }
+        function fade(t) { return t * t * (3 - 2 * t); }
+        return (x, y) => {
+            const x0 = Math.floor(x), y0 = Math.floor(y);
+            const tx = x - x0, ty = y - y0;
+            const n00 = dot(x0, y0, tx, ty);
+            const n10 = dot(x0 + 1, y0, tx - 1, ty);
+            const n01 = dot(x0, y0 + 1, tx, ty - 1);
+            const n11 = dot(x0 + 1, y0 + 1, tx - 1, ty - 1);
+            const u = fade(tx), v = fade(ty);
+            const nx0 = n00 * (1 - u) + n10 * u;
+            const nx1 = n01 * (1 - u) + n11 * u;
+            return (nx0 * (1 - v) + nx1 * v); // -1..1 range-ish
+        };
+    }
+    function mulberry32(a) {
+        return function () {
+            let t = a += 0x6D2B79F5;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+    // Detect if a tile is adjacent to water for foam banding
+    function isWaterEdge(map, x, y) {
+        if (map[y][x] !== colorMapping_3.GameElement.WATER)
+            return false;
+        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (const [dx, dy] of dirs) {
+            const nx = x + dx, ny = y + dy;
+            if (ny >= 0 && ny < map.length && nx >= 0 && nx < map[0].length) {
+                if (map[ny][nx] !== colorMapping_3.GameElement.WATER)
+                    return true;
+            }
+        }
+        return false;
+    }
+    exports_20("isWaterEdge", isWaterEdge);
+    return {
+        setters: [
+            function (colorMapping_3_1) {
+                colorMapping_3 = colorMapping_3_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+// Simple procedural icon generator for element sprites
+// Produces 32x32 PNG data URLs with minimalist symbols and colors
+System.register("components/proceduralSprites", [], function (exports_21, context_21) {
+    "use strict";
+    var __moduleName = context_21 && context_21.id;
+    function generateProceduralSprite(kind, size = 32) {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx)
+            return '';
+        // Background transparent
+        ctx.clearRect(0, 0, size, size);
+        // Helper drawing utilities
+        const center = { x: size / 2, y: size / 2 };
+        const drawCircle = (x, y, r, fill) => {
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fillStyle = fill;
+            ctx.fill();
+        };
+        const drawRoundedRect = (x, y, w, h, r, fill) => {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+            ctx.fillStyle = fill;
+            ctx.fill();
+        };
+        const drawTriangle = (points, fill) => {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++)
+                ctx.lineTo(points[i].x, points[i].y);
+            ctx.closePath();
+            ctx.fillStyle = fill;
+            ctx.fill();
+        };
+        const strokeSimple = (color, width = 2) => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        };
+        // Symbol palettes
+        const colors = {
+            enemy: '#e74c3c',
+            danger: '#ff5c33',
+            finish: '#2ecc71',
+            treasure: '#f1c40f',
+            key: '#f1c40f',
+            door: '#8e5a3c',
+            stairs: '#bdc3c7',
+            blade: '#95a5a6',
+            fire: '#ff7a1a',
+            water: '#4aa3ff',
+            grass: '#2ecc71'
+        };
+        // Draw per kind
+        switch (kind) {
+            case 'enemy': {
+                // Simple skull icon
+                drawCircle(center.x, center.y, size * 0.24, colors.enemy);
+                strokeSimple('#ffffff');
+                ctx.beginPath();
+                ctx.moveTo(center.x - 4, center.y + 6);
+                ctx.lineTo(center.x + 4, center.y + 6);
+                ctx.stroke();
+                drawCircle(center.x - 5, center.y - 2, 2, '#ffffff');
+                drawCircle(center.x + 5, center.y - 2, 2, '#ffffff');
+                break;
+            }
+            case 'danger': {
+                // Warning triangle
+                drawTriangle([
+                    { x: center.x, y: center.y - 10 },
+                    { x: center.x - 11, y: center.y + 9 },
+                    { x: center.x + 11, y: center.y + 9 }
+                ], colors.danger);
+                drawCircle(center.x, center.y + 6, 2, '#ffffff');
+                drawRoundedRect(center.x - 1, center.y - 3, 2, 7, 1, '#ffffff');
+                break;
+            }
+            case 'finish': {
+                // Checkmark
+                drawRoundedRect(4, 4, size - 8, size - 8, 6, colors.finish);
+                strokeSimple('#ffffff', 3);
+                ctx.beginPath();
+                ctx.moveTo(9, center.y + 2);
+                ctx.lineTo(center.x - 1, center.y + 8);
+                ctx.lineTo(size - 9, 9);
+                ctx.stroke();
+                break;
+            }
+            case 'treasure': {
+                // Coin
+                drawCircle(center.x, center.y, 10, colors.treasure);
+                strokeSimple('#ffffff', 2);
+                ctx.beginPath();
+                ctx.arc(center.x, center.y, 6, 0, Math.PI * 2);
+                ctx.stroke();
+                break;
+            }
+            case 'key': {
+                // Key glyph
+                drawCircle(center.x - 5, center.y - 2, 5, colors.key);
+                drawRoundedRect(center.x - 1, center.y - 2, 12, 3, 1.5, colors.key);
+                drawRoundedRect(center.x + 6, center.y - 4, 2, 2, 1, '#ffffff');
+                drawRoundedRect(center.x + 8, center.y - 4, 2, 2, 1, '#ffffff');
+                break;
+            }
+            case 'door': {
+                // Door rectangle with knob
+                drawRoundedRect(7, 5, size - 14, size - 8, 4, colors.door);
+                drawCircle(size - 12, center.y, 2, '#f7e3a1');
+                break;
+            }
+            case 'stairs': {
+                // Stair steps
+                drawRoundedRect(5, 20, 22, 4, 1, colors.stairs);
+                drawRoundedRect(8, 15, 18, 4, 1, colors.stairs);
+                drawRoundedRect(11, 10, 14, 4, 1, colors.stairs);
+                break;
+            }
+            case 'blade': {
+                // Simple sword
+                drawRoundedRect(center.x - 1, 6, 2, 16, 1, colors.blade);
+                drawRoundedRect(center.x - 5, 18, 10, 2, 1, '#c99a3b');
+                drawTriangle([
+                    { x: center.x, y: 4 },
+                    { x: center.x - 3, y: 8 },
+                    { x: center.x + 3, y: 8 }
+                ], colors.blade);
+                break;
+            }
+            case 'fire': {
+                // Flame blob
+                drawCircle(center.x, center.y + 2, 8, colors.fire);
+                drawTriangle([
+                    { x: center.x, y: center.y - 8 },
+                    { x: center.x - 6, y: center.y + 2 },
+                    { x: center.x + 6, y: center.y + 2 }
+                ], colors.fire);
+                drawCircle(center.x, center.y + 1, 4, '#ffd68a');
+                break;
+            }
+            case 'water': {
+                // Droplet
+                drawTriangle([
+                    { x: center.x, y: 6 },
+                    { x: center.x - 7, y: 16 },
+                    { x: center.x + 7, y: 16 }
+                ], colors.water);
+                drawCircle(center.x, 16, 7, colors.water);
+                drawCircle(center.x + 2, 12, 2, '#ffffff');
+                break;
+            }
+            case 'grass': {
+                // Two-tone dithered tuft
+                const dark = '#1f8a4a';
+                const light = '#4fd08a';
+                drawRoundedRect(6, 24, size - 12, 2, 1, '#1e5c36');
+                // base triangle
+                drawTriangle([
+                    { x: center.x, y: 8 },
+                    { x: center.x - 10, y: 24 },
+                    { x: center.x + 10, y: 24 }
+                ], dark);
+                // light dither dots
+                ctx.fillStyle = light;
+                for (let y = 10; y <= 22; y += 2) {
+                    for (let x = 0; x < size; x += 2) {
+                        const px = x + ((y % 4) === 0 ? 1 : 0);
+                        const py = y;
+                        if (px > 6 && px < size - 6 && py < 24) {
+                            // within triangle bounds roughly
+                            const t = (py - 8) / (24 - 8);
+                            const half = 10 * (1 - t);
+                            if (px > center.x - half && px < center.x + half)
+                                ctx.fillRect(px, py, 1, 1);
+                        }
+                    }
+                }
+                // vein
+                strokeSimple('#eaffea', 1);
+                ctx.beginPath();
+                ctx.moveTo(center.x, 12);
+                ctx.quadraticCurveTo(center.x + 3, 18, center.x, 24);
+                ctx.stroke();
+                break;
+            }
+        }
+        return canvas.toDataURL('image/png');
+    }
+    exports_21("generateProceduralSprite", generateProceduralSprite);
+    return {
+        setters: [],
+        execute: function () {
+        }
+    };
+});
+System.register("components/threeJSDungeonCrawler", ["colorMapping", "components/terrain", "components/proceduralSprites"], function (exports_22, context_22) {
+    "use strict";
+    var colorMapping_4, terrain_1, proceduralSprites_1;
+    var __moduleName = context_22 && context_22.id;
     function createThreeJSDungeonCrawler() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "threeJSDungeonCrawlerComponent" }),
@@ -2239,6 +2608,21 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         let scene;
         let camera;
         let renderer;
+        // UI container for mounting the renderer (no HTML overlays)
+        let uiContainer;
+        // HUD rendered inside the 3D scene
+        let hudHealthCanvas;
+        let hudHealthCtx;
+        let hudHealthTexture; // THREE.CanvasTexture
+        let hudHealthSprite; // THREE.Sprite
+        let hudMinimapCanvas;
+        let hudMinimapCtx;
+        let hudMinimapTexture; // THREE.CanvasTexture
+        let hudMinimapSprite; // THREE.Sprite
+        // Fancy environment visuals
+        let waterMaterials = []; // THREE.ShaderMaterial[]
+        let grassSwaySprites = []; // THREE.Sprite[] with sway data
+        let glintSprites = []; // collectible shimmer sprites
         let animationId;
         // Postprocessing render targets and quad
         let postRenderTarget;
@@ -2251,6 +2635,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         let paletteSelect = null;
         // Game state
         let currentGameMap = [];
+        let heightMap = [];
         let enemies = [];
         let gameRunning = false;
         // Player state
@@ -2285,6 +2670,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         let debugSpheres = [];
         // Particle system variables
         let particleSystems = new Map();
+        let transientSplashSystems = [];
+        let lastInWater = false;
+        let landingCooldown = 0;
         let fireLights = [];
         const glowSprites = [];
         // Visibility/occlusion data
@@ -2320,6 +2708,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             // Initialize Three.js scene
             await setupThreeJS();
             // Create the dungeon geometry
+            heightMap = terrain_1.buildHeightMap(currentGameMap);
             createDungeon();
             // In case the spawn is blocked, relocate to nearest walkable tile
             ensureSpawnAccessible();
@@ -2348,6 +2737,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             renderer.domElement.style.setProperty('image-rendering', 'pixelated');
             renderer.domElement.style.setProperty('image-rendering', 'crisp-edges');
             renderer.setPixelRatio(1);
+            // Enable shadow mapping
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             // Modern color and tone mapping
             if (renderer.outputColorSpace !== undefined) {
                 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -2357,6 +2749,74 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             }
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 1.2;
+            // UI container
+            uiContainer = document.createElement('div');
+            uiContainer.style.position = 'relative';
+            uiContainer.style.width = `${BASE_WIDTH * DISPLAY_SCALE}px`;
+            uiContainer.style.height = `${BASE_HEIGHT * DISPLAY_SCALE}px`;
+            // Mount renderer inside UI container
+            uiContainer.appendChild(renderer.domElement);
+            // component.domElement is typed as Node; cast to HTMLElement for DOM ops
+            const hostEl = component.domElement;
+            hostEl.innerHTML = '';
+            hostEl.appendChild(uiContainer);
+            // Create HUD canvases (offscreen) and sprites attached to camera
+            // Health bar canvas
+            hudHealthCanvas = document.createElement('canvas');
+            hudHealthCanvas.width = 128;
+            hudHealthCanvas.height = 16;
+            hudHealthCtx = hudHealthCanvas.getContext('2d');
+            hudHealthTexture = new THREE.CanvasTexture(hudHealthCanvas);
+            hudHealthTexture.magFilter = THREE.NearestFilter;
+            hudHealthTexture.minFilter = THREE.NearestFilter;
+            hudHealthTexture.generateMipmaps = false;
+            const hbMat = new THREE.SpriteMaterial({ map: hudHealthTexture, transparent: true, depthWrite: false });
+            hudHealthSprite = new THREE.Sprite(hbMat);
+            hudHealthSprite.scale.set(0.9, 0.12, 1);
+            hudHealthSprite.position.set(0, -0.68, -1.1);
+            hudHealthSprite.renderOrder = 9999;
+            hudHealthSprite.material.depthTest = false;
+            hudHealthSprite.material.depthWrite = false;
+            camera.add(hudHealthSprite);
+            scene.add(camera); // ensure camera is in scene for children rendering
+            // Minimap canvas
+            hudMinimapCanvas = document.createElement('canvas');
+            hudMinimapCanvas.width = 128;
+            hudMinimapCanvas.height = 128;
+            hudMinimapCtx = hudMinimapCanvas.getContext('2d');
+            hudMinimapTexture = new THREE.CanvasTexture(hudMinimapCanvas);
+            hudMinimapTexture.magFilter = THREE.NearestFilter;
+            hudMinimapTexture.minFilter = THREE.NearestFilter;
+            hudMinimapTexture.generateMipmaps = false;
+            const mmMat = new THREE.SpriteMaterial({ map: hudMinimapTexture, transparent: true, depthWrite: false });
+            hudMinimapSprite = new THREE.Sprite(mmMat);
+            hudMinimapSprite.scale.set(0.42, 0.42, 1);
+            hudMinimapSprite.position.set(0.8, 0.55, -1.2);
+            hudMinimapSprite.renderOrder = 9999;
+            hudMinimapSprite.material.depthTest = false;
+            hudMinimapSprite.material.depthWrite = false;
+            camera.add(hudMinimapSprite);
+            // Blue overlay for underwater effect (hidden by default)
+            const overlayCanvas = document.createElement('canvas');
+            overlayCanvas.width = 64;
+            overlayCanvas.height = 64; // tiny, pixelated
+            const octx = overlayCanvas.getContext('2d');
+            if (octx) {
+                octx.fillStyle = 'rgba(0,0,0,0)';
+                octx.fillRect(0, 0, 64, 64);
+            }
+            const overlayTex = new THREE.CanvasTexture(overlayCanvas);
+            overlayTex.magFilter = THREE.NearestFilter;
+            overlayTex.minFilter = THREE.NearestFilter;
+            overlayTex.generateMipmaps = false;
+            const overlayMat = new THREE.SpriteMaterial({ map: overlayTex, transparent: true, depthTest: false, depthWrite: false });
+            const overlaySprite = new THREE.Sprite(overlayMat);
+            overlaySprite.scale.set(1.6, 0.9, 1);
+            overlaySprite.position.set(0, 0, -0.9);
+            overlaySprite.renderOrder = 10000;
+            camera.add(overlaySprite);
+            // Store for updates
+            scene.waterOverlay = { canvas: overlayCanvas, ctx: octx, texture: overlayTex, sprite: overlaySprite };
             renderer.useLegacyLights = false;
             // Advanced lighting system
             setupLighting();
@@ -2555,12 +3015,12 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         }
         function setupLighting() {
             // Ambient and hemisphere fill for general visibility
-            const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x404040, 0.6);
+            const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x404040, 0.9);
             scene.add(hemi);
-            const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+            const ambient = new THREE.AmbientLight(0xffffff, 0.35);
             scene.add(ambient);
             // Player torch light (follows player)
-            const playerTorch = new THREE.PointLight(0xffc866, 2.2, 18);
+            const playerTorch = new THREE.PointLight(0xffc866, 5.0, 16);
             playerTorch.position.set(player.x, 1.5, player.y);
             playerTorch.castShadow = true;
             // Enhanced shadow settings
@@ -2592,8 +3052,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             updateVisibility();
         }
         function createFloor(width, height) {
-            // Create floor geometry
-            const floorGeometry = new THREE.PlaneGeometry(width, height);
+            // Create a height-aware floor using a grid of segments
+            const floorGeometry = new THREE.PlaneGeometry(width, height, width, height);
             // Load floor texture
             const floorTexture = textureLoader.load('textures/floor_stone.png');
             floorTexture.wrapS = THREE.RepeatWrapping;
@@ -2616,6 +3076,20 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 emissive: new THREE.Color(0x1a1a1a),
                 emissiveIntensity: 0.08
             });
+            // Apply per-vertex heights from heightMap
+            const pos = floorGeometry.attributes.position;
+            for (let y = 0; y <= height; y++) {
+                for (let x = 0; x <= width; x++) {
+                    const idx = (y * (width + 1) + x) * 3;
+                    // PlaneGeometry is centered; offset to grid space
+                    const gx = x - 0.5;
+                    const gy = y - 0.5;
+                    const h = terrain_1.sampleHeightBilinear(heightMap, gx, gy);
+                    // Before rotation, z becomes world Y after we rotate floor by -PI/2
+                    pos.array[idx + 2] = h;
+                }
+            }
+            pos.needsUpdate = true;
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
             floor.position.set(width / 2 - 0.5, 0, height / 2 - 0.5);
@@ -2660,7 +3134,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
                     const element = currentGameMap[y][x];
-                    const properties = colorMapping_3.getElementProperties(element);
+                    const properties = colorMapping_4.getElementProperties(element);
                     if (!properties.walkable) {
                         createWall(x, y, element);
                     }
@@ -2684,7 +3158,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             ];
             const wall = new THREE.Mesh(wallGeometry, wallMaterial);
             // Position wall at grid coordinates (x, y)
-            wall.position.set(x, WALL_HEIGHT / 2, y);
+            const groundH = terrain_1.sampleHeightBilinear(heightMap, x, y);
+            wall.position.set(x, groundH + WALL_HEIGHT / 2, y);
             wall.castShadow = true;
             wall.receiveShadow = true;
             wall.rotation.y = 0;
@@ -2713,16 +3188,16 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         function getWallTexture(element) {
             let texturePath;
             switch (element) {
-                case colorMapping_3.GameElement.WALL:
+                case colorMapping_4.GameElement.WALL:
                     texturePath = 'textures/wall_stone.png';
                     break;
-                case colorMapping_3.GameElement.DOOR:
+                case colorMapping_4.GameElement.DOOR:
                     texturePath = 'textures/wood_texture.png';
                     break;
-                case colorMapping_3.GameElement.DANGER:
+                case colorMapping_4.GameElement.DANGER:
                     texturePath = 'textures/danger_texture.png';
                     break;
-                case colorMapping_3.GameElement.FIRE:
+                case colorMapping_4.GameElement.FIRE:
                     texturePath = 'textures/fire_texture.png';
                     break;
                 default:
@@ -2753,8 +3228,24 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                     const element = currentGameMap[y][x];
                     // Create sprites for ALL elements that have sprites, not just interactive ones
                     // Skip WALL since walls are handled by createWalls()
-                    if (element !== colorMapping_3.GameElement.WALL && element !== colorMapping_3.GameElement.FLOOR) {
+                    if (element !== colorMapping_4.GameElement.WALL && element !== colorMapping_4.GameElement.FLOOR) {
                         createSprite(x, y, element);
+                        // Add collectible glint shimmer for treasures and keys
+                        if (element === colorMapping_4.GameElement.TREASURE || element === colorMapping_4.GameElement.KEY) {
+                            const tex = new THREE.TextureLoader().load(proceduralSprites_1.generateProceduralSprite('treasure'));
+                            tex.minFilter = THREE.NearestFilter;
+                            tex.magFilter = THREE.NearestFilter;
+                            tex.generateMipmaps = false;
+                            const mat = new THREE.SpriteMaterial({ map: tex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7 });
+                            const s = new THREE.Sprite(mat);
+                            const h = terrain_1.sampleHeightBilinear(heightMap, x, y);
+                            s.position.set(x, h + 0.9, y);
+                            s.scale.set(0.5, 0.5, 1);
+                            s.glint = true;
+                            s.phase = Math.random() * Math.PI * 2;
+                            scene.add(s);
+                            glintSprites.push(s);
+                        }
                     }
                 }
             }
@@ -2763,20 +3254,36 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             const spritePath = getSpritePath(element);
             if (spritePath) {
                 // Create sprite with texture
-                const texture = textureLoader.load(spritePath);
+                // Support data URLs returned by generator
+                const texture = spritePath.startsWith('data:') ? new THREE.TextureLoader().load(spritePath) : textureLoader.load(spritePath);
+                // Make pixel art crisp and avoid blurry squares
+                if (texture) {
+                    if (texture.colorSpace !== undefined) {
+                        texture.colorSpace = THREE.SRGBColorSpace;
+                    }
+                    else if (texture.encoding !== undefined) {
+                        texture.encoding = THREE.sRGBEncoding;
+                    }
+                    texture.minFilter = THREE.NearestFilter;
+                    texture.magFilter = THREE.NearestFilter;
+                    texture.generateMipmaps = false;
+                    texture.needsUpdate = true;
+                }
                 const spriteMaterial = new THREE.SpriteMaterial({
                     map: texture,
                     transparent: true,
-                    fog: true
+                    fog: true,
+                    depthWrite: false,
+                    alphaTest: 0.05
                 });
                 const sprite = new THREE.Sprite(spriteMaterial);
-                sprite.position.set(x, 1, y);
-                sprite.scale.set(0.8, 0.8, 0.8);
+                sprite.position.set(x, 0.9, y);
+                sprite.scale.set(0.6, 0.6, 0.6);
                 scene.add(sprite);
                 // Add emissive glow for certain elements
-                if (element === colorMapping_3.GameElement.FIRE || element === colorMapping_3.GameElement.TREASURE) {
-                    const glowColor = element === colorMapping_3.GameElement.FIRE ? 0xffa200 : 0xffee66;
-                    const glowTex = textureLoader.load('sprites/treasure.png');
+                if (false && (element === colorMapping_4.GameElement.FIRE || element === colorMapping_4.GameElement.TREASURE)) {
+                    const glowColor = element === colorMapping_4.GameElement.FIRE ? 0xffa200 : 0xffee66;
+                    const glowTex = new THREE.TextureLoader().load(proceduralSprites_1.generateProceduralSprite(element === colorMapping_4.GameElement.FIRE ? 'fire' : 'treasure'));
                     const glowMat = new THREE.SpriteMaterial({
                         map: glowTex,
                         color: glowColor,
@@ -2784,14 +3291,27 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         blending: THREE.AdditiveBlending,
                         depthWrite: false,
                         fog: true,
-                        opacity: 0.8
+                        opacity: element === colorMapping_4.GameElement.FIRE ? 0.5 : 0.65
                     });
                     const glow = new THREE.Sprite(glowMat);
-                    glow.position.set(x, 1, y);
-                    glow.scale.set(1.1, 1.1, 1.1);
+                    glow.position.set(x, 0.95, y);
+                    glow.scale.set(0.9, 0.9, 0.9);
                     glow.pulse = true;
                     scene.add(glow);
                     glowSprites.push(glow);
+                }
+                // For environment tiles, prefer custom ground visuals only (no hovering icons)
+                if (element === colorMapping_4.GameElement.GRASS || element === colorMapping_4.GameElement.WATER || element === colorMapping_4.GameElement.DANGER || element === colorMapping_4.GameElement.FIRE) {
+                    // Remove the sprite we just created and use ground visuals instead
+                    scene.remove(sprite);
+                    if (element === colorMapping_4.GameElement.FIRE || element === colorMapping_4.GameElement.DANGER) {
+                        // Keep only ground tile; no glow sprite for now
+                        createColoredQuad(x, y, element);
+                    }
+                    else {
+                        createColoredQuad(x, y, element);
+                    }
+                    return;
                 }
             }
             else {
@@ -2800,24 +3320,71 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             }
         }
         function createColoredQuad(x, y, element) {
-            // Create a simple colored plane for elements without sprites
-            const geometry = new THREE.PlaneGeometry(0.8, 0.8);
-            const material = new THREE.MeshBasicMaterial({
-                color: getElementColor(element),
-                transparent: true,
-                opacity: 0.7,
-                side: THREE.DoubleSide,
-                fog: true
-            });
-            const quad = new THREE.Mesh(geometry, material);
-            quad.position.set(x, 0.1, y); // Slightly above ground
-            quad.rotation.x = -Math.PI / 2; // Lay flat on ground
-            // Add subtle animation for interactive elements
-            if (colorMapping_3.getElementProperties(element).interactive) {
-                quad.userData = { originalY: 0.1, element };
-                quad.animate = true;
+            // Artistic ground tiles for grass/water
+            const size = 0.96;
+            const base = new THREE.PlaneGeometry(size, size, 1, 1);
+            const color = getElementColor(element);
+            const baseMat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.0, transparent: true, opacity: 0.9, side: THREE.DoubleSide, fog: true });
+            const tile = new THREE.Mesh(base, baseMat);
+            const groundH = terrain_1.sampleHeightBilinear(heightMap, x, y);
+            tile.position.set(x, groundH + 0.01, y);
+            tile.rotation.x = -Math.PI / 2;
+            tile.receiveShadow = true;
+            scene.add(tile);
+            if (element === colorMapping_4.GameElement.GRASS) {
+                // Add 3 swaying grass blades as sprites
+                for (let i = 0; i < 3; i++) {
+                    const tex = new THREE.TextureLoader().load(proceduralSprites_1.generateProceduralSprite('grass'));
+                    tex.minFilter = THREE.NearestFilter;
+                    tex.magFilter = THREE.NearestFilter;
+                    tex.generateMipmaps = false;
+                    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true, alphaTest: 0.05 });
+                    const s = new THREE.Sprite(mat);
+                    s.position.set(x + (Math.random() - 0.5) * 0.5, groundH + 0.12, y + (Math.random() - 0.5) * 0.5);
+                    s.scale.set(0.35, 0.35, 1);
+                    s.swayPhase = Math.random() * Math.PI * 2;
+                    s.castShadow = true;
+                    scene.add(s);
+                    grassSwaySprites.push(s);
+                }
             }
-            scene.add(quad);
+            else if (element === colorMapping_4.GameElement.WATER) {
+                // Add shimmered water surface using simple shader
+                const waterGeo = new THREE.PlaneGeometry(size, size, 16, 16);
+                const waterMat = new THREE.ShaderMaterial({
+                    uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0x4aa3ff) } },
+                    vertexShader: `
+          uniform float time;
+          void main() {
+            vec3 p = position;
+            p.z += sin((position.x + position.y) * 6.0 + time * 2.0) * 0.02;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+          }
+        `,
+                    fragmentShader: `
+          uniform vec3 baseColor;
+          void main(){
+            gl_FragColor = vec4(baseColor, 0.85);
+          }
+        `,
+                    transparent: true,
+                    depthWrite: false
+                });
+                const water = new THREE.Mesh(waterGeo, waterMat);
+                water.rotation.x = -Math.PI / 2;
+                water.position.set(x, groundH + 0.03, y);
+                water.receiveShadow = true; // catch soft caustic shadows from scene lights
+                scene.add(water);
+                waterMaterials.push(waterMat);
+                // Foam ring for water edges
+                if (terrain_1.isWaterEdge(currentGameMap, Math.floor(x), Math.floor(y))) {
+                    const foam = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.48, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+                    foam.rotation.x = -Math.PI / 2;
+                    foam.position.set(x, groundH + 0.035, y);
+                    foam.renderOrder = 3;
+                    scene.add(foam);
+                }
+            }
         }
         function createParticleEffects() {
             // Clear existing particle systems
@@ -2825,6 +3392,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 systems.forEach(system => scene.remove(system));
             });
             particleSystems.clear();
+            // Clear transient splashes
+            transientSplashSystems.forEach(sys => scene.remove(sys));
+            transientSplashSystems = [];
             // Clear existing fire lights
             fireLights.forEach(light => scene.remove(light));
             fireLights = [];
@@ -2832,13 +3402,13 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             for (let y = 0; y < currentGameMap.length; y++) {
                 for (let x = 0; x < currentGameMap[y].length; x++) {
                     const element = currentGameMap[y][x];
-                    const properties = colorMapping_3.getElementProperties(element);
+                    const properties = colorMapping_4.getElementProperties(element);
                     // Only create particles for non-wall elements that need atmosphere
-                    if (element !== colorMapping_3.GameElement.WALL && element !== colorMapping_3.GameElement.FLOOR) {
+                    if (element !== colorMapping_4.GameElement.WALL && element !== colorMapping_4.GameElement.FLOOR) {
                         createParticlesForElement(x, y, element);
                     }
                     // Add fire lights
-                    if (element === colorMapping_3.GameElement.FIRE) {
+                    if (element === colorMapping_4.GameElement.FIRE) {
                         createFireLight(x, y);
                     }
                 }
@@ -2923,7 +3493,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         }
         function getParticleConfig(element) {
             switch (element) {
-                case colorMapping_3.GameElement.WATER:
+                case colorMapping_4.GameElement.WATER:
                     return {
                         count: 8,
                         color: 0x4488ff, // Light blue
@@ -2931,7 +3501,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         speed: 0.5,
                         spread: 0.6
                     };
-                case colorMapping_3.GameElement.GRASS:
+                case colorMapping_4.GameElement.GRASS:
                     return {
                         count: 6,
                         color: 0x22aa44, // Green
@@ -2939,7 +3509,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         speed: 0.3,
                         spread: 0.8
                     };
-                case colorMapping_3.GameElement.FIRE:
+                case colorMapping_4.GameElement.FIRE:
                     return {
                         count: 12,
                         color: 0xff6600, // Orange
@@ -2947,7 +3517,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         speed: 1.5,
                         spread: 0.4
                     };
-                case colorMapping_3.GameElement.DANGER:
+                case colorMapping_4.GameElement.DANGER:
                     return {
                         count: 10,
                         color: 0xff0044, // Red
@@ -2955,14 +3525,14 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         speed: 1.0,
                         spread: 0.7
                     };
-                case colorMapping_3.GameElement.PLAYER_START:
+                case colorMapping_4.GameElement.PLAYER_START:
                     return null; // Disable particles at player start to avoid huge near-camera points
                 default:
                     return null;
             }
         }
         function createFireLight(x, y) {
-            const fireLight = new THREE.PointLight(0xffaa44, 0.7, 7);
+            const fireLight = new THREE.PointLight(0xffaa44, 1.1, 8);
             fireLight.position.set(x, 0.8, y);
             fireLight.castShadow = false; // Don't cast shadows to avoid performance issues
             scene.add(fireLight);
@@ -2982,7 +3552,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         // Gentle floating motion
                         positions[i + 1] = originalPositions[i + 1] + Math.sin(time * speed + i * 0.1) * 0.1;
                         // For fire particles, add more chaotic motion
-                        if (element === colorMapping_3.GameElement.FIRE) {
+                        if (element === colorMapping_4.GameElement.FIRE) {
                             positions[i] = originalPositions[i] + Math.sin(time * speed * 2 + i * 0.2) * 0.05;
                             positions[i + 2] = originalPositions[i + 2] + Math.cos(time * speed * 1.5 + i * 0.15) * 0.05;
                         }
@@ -2996,18 +3566,38 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 const flicker = Math.sin(time * 8 + index) * 0.2 + Math.sin(time * 12 + index * 2) * 0.1;
                 light.intensity = baseIntensity + flicker;
             });
+            // Update water shader time
+            waterMaterials.forEach((mat) => {
+                if (mat.uniforms && mat.uniforms.time) {
+                    mat.uniforms.time.value = time;
+                }
+            });
+            // Grass sway
+            grassSwaySprites.forEach((s, idx) => {
+                const phase = s.swayPhase || 0;
+                s.rotation.z = Math.sin(time * 2.0 + phase) * 0.08;
+            });
+            // Remove expired splash systems
+            transientSplashSystems = transientSplashSystems.filter((sys) => {
+                sys.userData.life -= 0.016;
+                if (sys.userData.life <= 0) {
+                    scene.remove(sys);
+                    return false;
+                }
+                return true;
+            });
         }
         function getElementColor(element) {
             switch (element) {
-                case colorMapping_3.GameElement.GRASS:
+                case colorMapping_4.GameElement.GRASS:
                     return 0x008000; // Green
-                case colorMapping_3.GameElement.WATER:
+                case colorMapping_4.GameElement.WATER:
                     return 0x0000FF; // Blue
-                case colorMapping_3.GameElement.FIRE:
+                case colorMapping_4.GameElement.FIRE:
                     return 0xFF4500; // Orange-Red
-                case colorMapping_3.GameElement.PLAYER_START:
+                case colorMapping_4.GameElement.PLAYER_START:
                     return 0xFFFF00; // Yellow
-                case colorMapping_3.GameElement.DANGER:
+                case colorMapping_4.GameElement.DANGER:
                     return 0xFF0000; // Red
                 default:
                     return 0xFFFFFF; // White fallback
@@ -3015,27 +3605,27 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         }
         function getSpritePath(element) {
             switch (element) {
-                case colorMapping_3.GameElement.ENEMY:
-                    return 'sprites/enemy.png';
-                case colorMapping_3.GameElement.DANGER:
-                    return 'sprites/danger.png';
-                case colorMapping_3.GameElement.PLAYER_FINISH:
-                    return 'sprites/finish.png';
-                case colorMapping_3.GameElement.TREASURE:
-                    return 'sprites/treasure.png';
-                case colorMapping_3.GameElement.KEY:
-                    return 'sprites/key.png';
-                case colorMapping_3.GameElement.DOOR:
-                    return 'sprites/door.png';
-                case colorMapping_3.GameElement.STAIRS:
-                    return 'sprites/stairs.png';
-                case colorMapping_3.GameElement.FIRE:
-                    return 'sprites/blade.png'; // Use blade sprite for fire
-                case colorMapping_3.GameElement.GRASS:
-                    return null; // Will create colored quad instead
-                case colorMapping_3.GameElement.WATER:
-                    return null; // Will create colored quad instead
-                case colorMapping_3.GameElement.PLAYER_START:
+                case colorMapping_4.GameElement.ENEMY:
+                    return proceduralSprites_1.generateProceduralSprite('enemy');
+                case colorMapping_4.GameElement.DANGER:
+                    return proceduralSprites_1.generateProceduralSprite('danger');
+                case colorMapping_4.GameElement.PLAYER_FINISH:
+                    return proceduralSprites_1.generateProceduralSprite('finish');
+                case colorMapping_4.GameElement.TREASURE:
+                    return proceduralSprites_1.generateProceduralSprite('treasure');
+                case colorMapping_4.GameElement.KEY:
+                    return proceduralSprites_1.generateProceduralSprite('key');
+                case colorMapping_4.GameElement.DOOR:
+                    return proceduralSprites_1.generateProceduralSprite('door');
+                case colorMapping_4.GameElement.STAIRS:
+                    return proceduralSprites_1.generateProceduralSprite('stairs');
+                case colorMapping_4.GameElement.FIRE:
+                    return proceduralSprites_1.generateProceduralSprite('fire');
+                case colorMapping_4.GameElement.GRASS:
+                    return proceduralSprites_1.generateProceduralSprite('grass');
+                case colorMapping_4.GameElement.WATER:
+                    return proceduralSprites_1.generateProceduralSprite('water');
+                case colorMapping_4.GameElement.PLAYER_START:
                     return null; // Will create colored quad instead
                 default:
                     return null;
@@ -3097,17 +3687,30 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 player.angle += mouseX * 0.002;
                 mouseX = 0; // Reset mouse movement
             }
-            // Check collision and update position
+            // Water slow and swimming bobbing
+            const tileX = Math.floor(newX);
+            const tileY = Math.floor(newY);
+            const inBounds = tileY >= 0 && tileY < currentGameMap.length && tileX >= 0 && tileX < currentGameMap[0].length;
+            const inWater = inBounds && currentGameMap[tileY][tileX] === colorMapping_4.GameElement.WATER;
+            const speedMultiplier = inWater ? 0.55 : 1.0;
+            const groundH = terrain_1.sampleHeightBilinear(heightMap, newX, newY);
+            const waterDepth = inWater ? Math.max(0, (0.0 - groundH) + 0.35) : 0;
+            // Check collision and update position with speed multiplier
+            const prevX = player.x;
+            const prevY = player.y;
             if (isValidPosition(newX, newY)) {
-                player.x = newX;
-                player.y = newY;
+                player.x += (newX - player.x) * speedMultiplier;
+                player.y += (newY - player.y) * speedMultiplier;
             }
             else {
                 // Try to slide along walls if direct movement is blocked
                 trySlideAlongWalls(newX, newY);
             }
-            // Update camera position
-            camera.position.set(player.x, 1, player.y);
+            // Update camera position with swim bob and terrain height
+            const swimBob = inWater ? (Math.sin(Date.now() * 0.006) * 0.08) : 0;
+            const baseEye = 1 + groundH; // eye follows local terrain
+            const buoyancy = inWater ? Math.min(0.5, waterDepth * 0.6) : 0;
+            camera.position.set(player.x, baseEye - buoyancy + swimBob, player.y);
             const lookX = player.x + Math.cos(player.angle) * 2;
             const lookZ = player.y + Math.sin(player.angle) * 2;
             camera.lookAt(lookX, 1, lookZ);
@@ -3118,6 +3721,84 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 const t = Date.now() * 0.002;
                 torch.intensity = 2.0 + Math.sin(t * 3.2) * 0.2 + Math.sin(t * 5.7) * 0.1;
             }
+            // Detect water enter/exit for splashes
+            if (inWater && !lastInWater) {
+                spawnWaterSplash(player.x, player.y);
+                playSplashSound();
+            }
+            lastInWater = inWater;
+            // Landing dust puff when quick stop on floor (cooldown to avoid spam)
+            landingCooldown = Math.max(0, landingCooldown - 0.016);
+            const speed = Math.hypot(player.x - prevX, player.y - prevY);
+            if (!inWater && speed < 0.0005 && landingCooldown <= 0 && (keysPressed.has('keys') || keysPressed.has('arrowdown'))) {
+                spawnDustPuff(player.x, player.y);
+                landingCooldown = 0.4;
+            }
+        }
+        function spawnWaterSplash(x, y) {
+            const count = 20;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const r = Math.random() * 0.35;
+                positions[i * 3] = x + Math.cos(a) * r;
+                positions[i * 3 + 1] = 0.1 + Math.random() * 0.2;
+                positions[i * 3 + 2] = y + Math.sin(a) * r;
+                colors[i * 3] = 0.4;
+                colors[i * 3 + 1] = 0.7;
+                colors[i * 3 + 2] = 1.0;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const material = new THREE.PointsMaterial({ size: 0.08, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false });
+            const points = new THREE.Points(geometry, material);
+            points.userData.life = 0.5; // seconds
+            scene.add(points);
+            transientSplashSystems.push(points);
+        }
+        function spawnDustPuff(x, y) {
+            const count = 14;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const r = Math.random() * 0.25;
+                positions[i * 3] = x + Math.cos(a) * r;
+                positions[i * 3 + 1] = 0.05 + Math.random() * 0.1;
+                positions[i * 3 + 2] = y + Math.sin(a) * r;
+                const c = 0.7 + Math.random() * 0.2;
+                colors[i * 3] = c;
+                colors[i * 3 + 1] = c;
+                colors[i * 3 + 2] = c;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const material = new THREE.PointsMaterial({ size: 0.07, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false });
+            const points = new THREE.Points(geometry, material);
+            points.userData.life = 0.35;
+            scene.add(points);
+            transientSplashSystems.push(points);
+        }
+        // Simple WebAudio splash synth
+        function playSplashSound() {
+            try {
+                const ctx = window.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                window.audioCtx = ctx;
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = 'triangle';
+                o.frequency.setValueAtTime(600, ctx.currentTime);
+                o.frequency.exponentialRampToValueAtTime(180, ctx.currentTime + 0.25);
+                g.gain.setValueAtTime(0.15, ctx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+                o.connect(g).connect(ctx.destination);
+                o.start();
+                o.stop(ctx.currentTime + 0.4);
+            }
+            catch { }
         }
         function isValidPosition(x, y) {
             // Debug logging for collision detection calls (only for first call per frame to reduce spam)
@@ -3179,7 +3860,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 // Check each valid cell for walls
                 for (const cell of validCells) {
                     const element = currentGameMap[cell.y][cell.x];
-                    const properties = colorMapping_3.getElementProperties(element);
+                    const properties = colorMapping_4.getElementProperties(element);
                     if (!properties.walkable) {
                         // Check if the collision point is within this wall's 3D bounding box
                         // Wall occupies: [cell.x - 0.5, cell.x + 0.5] x [0, WALL_HEIGHT] x [cell.y - 0.5, cell.y + 0.5]
@@ -3329,7 +4010,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 for (let y = 0; y < currentGameMap.length; y++) {
                     for (let x = 0; x < currentGameMap[y].length; x++) {
                         const element = currentGameMap[y][x];
-                        const properties = colorMapping_3.getElementProperties(element);
+                        const properties = colorMapping_4.getElementProperties(element);
                         if (!properties.walkable) {
                             // Recreate wireframe for this wall
                             const wireframeGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
@@ -3375,7 +4056,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                     if (tileX >= 0 && tileX < currentGameMap[0].length &&
                         tileY >= 0 && tileY < currentGameMap.length) {
                         const element = currentGameMap[tileY][tileX];
-                        const properties = colorMapping_3.getElementProperties(element);
+                        const properties = colorMapping_4.getElementProperties(element);
                         const material = debugSpheres[index].material;
                         material.color.setHex(properties.walkable ? 0x00ff00 : 0xff0000);
                     }
@@ -3386,6 +4067,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             if (!gameRunning)
                 return;
             updatePlayer();
+            applyTileEffects();
+            updateUI();
+            drawMinimap();
             updateDebugVisualization();
             updateSpriteAnimations();
             updateParticleEffects();
@@ -3405,6 +4089,152 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
             }
             animationId = requestAnimationFrame(gameLoop);
         }
+        function applyTileEffects() {
+            const tileX = Math.floor(player.x);
+            const tileY = Math.floor(player.y);
+            if (tileX < 0 || tileY < 0 || tileY >= currentGameMap.length || tileX >= currentGameMap[0].length)
+                return;
+            const element = currentGameMap[tileY][tileX];
+            // Fire and danger damage
+            if (element === colorMapping_4.GameElement.FIRE || element === colorMapping_4.GameElement.DANGER) {
+                changeHealth(-0.25); // damage per frame at ~60fps ~15 hp/s
+            }
+        }
+        function updateUI() {
+            // Draw pixelated health bar to HUD canvas
+            if (!hudHealthCtx)
+                return;
+            const ctx = hudHealthCtx;
+            const w = hudHealthCanvas.width;
+            const h = hudHealthCanvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.imageSmoothingEnabled = false;
+            // Frame
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, w, h);
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, w - 2, h - 2);
+            // Bar
+            const pct = Math.max(0, Math.min(1, player.health / player.maxHealth));
+            const barW = Math.floor((w - 6) * pct);
+            const grad = ctx.createLinearGradient(0, 0, w, 0);
+            grad.addColorStop(0, '#ff3b3b');
+            grad.addColorStop(1, '#ff7a3b');
+            ctx.fillStyle = grad;
+            ctx.fillRect(3, 3, barW, h - 6);
+            // Upload to texture
+            hudHealthTexture.needsUpdate = true;
+            // Water overlay update (underwater tint when in water tile)
+            const tileX = Math.floor(player.x);
+            const tileY = Math.floor(player.y);
+            const inBounds = tileY >= 0 && tileY < currentGameMap.length && tileX >= 0 && tileX < currentGameMap[0].length;
+            const inWater = inBounds && currentGameMap[tileY][tileX] === colorMapping_4.GameElement.WATER;
+            const overlay = scene.waterOverlay;
+            if (overlay && overlay.ctx) {
+                const c = overlay.canvas;
+                const octx = overlay.ctx;
+                octx.clearRect(0, 0, c.width, c.height);
+                if (inWater) {
+                    octx.fillStyle = 'rgba(50,120,220,0.28)';
+                    octx.fillRect(0, 0, c.width, c.height);
+                }
+                overlay.texture.needsUpdate = true;
+                overlay.sprite.visible = inWater;
+            }
+        }
+        function drawMinimap() {
+            if (!hudMinimapCtx)
+                return;
+            const ctx = hudMinimapCtx;
+            const w = hudMinimapCanvas.width;
+            const h = hudMinimapCanvas.height;
+            ctx.clearRect(0, 0, w, h);
+            if (!currentGameMap.length)
+                return;
+            const cols = currentGameMap[0].length;
+            const rows = currentGameMap.length;
+            const cell = Math.min(Math.floor(w / cols), Math.floor(h / rows));
+            const offsetX = Math.floor((w - cols * cell) / 2);
+            const offsetY = Math.floor((h - rows * cell) / 2);
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const el = currentGameMap[y][x];
+                    let color = '#2d2f3a';
+                    switch (el) {
+                        case colorMapping_4.GameElement.WALL:
+                            color = '#555a66';
+                            break;
+                        case colorMapping_4.GameElement.WATER:
+                            color = '#3a7bd9';
+                            break;
+                        case colorMapping_4.GameElement.GRASS:
+                            color = '#3bbf6a';
+                            break;
+                        case colorMapping_4.GameElement.FIRE:
+                            color = '#ff7a1a';
+                            break;
+                        case colorMapping_4.GameElement.DANGER:
+                            color = '#ff3366';
+                            break;
+                        case colorMapping_4.GameElement.DOOR:
+                            color = '#8e5a3c';
+                            break;
+                        case colorMapping_4.GameElement.STAIRS:
+                            color = '#cfd3d6';
+                            break;
+                        default: color = '#2d2f3a';
+                    }
+                    ctx.fillStyle = color;
+                    ctx.fillRect(offsetX + x * cell, offsetY + y * cell, cell, cell);
+                }
+            }
+            // Player
+            ctx.fillStyle = '#ffffff';
+            const px = offsetX + player.x * cell;
+            const py = offsetY + player.y * cell;
+            ctx.beginPath();
+            ctx.arc(px, py, Math.max(2, cell * 0.18), 0, Math.PI * 2);
+            ctx.fill();
+            // Facing indicator
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = Math.max(1, Math.floor(cell * 0.08));
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + Math.cos(player.angle) * cell * 0.5, py + Math.sin(player.angle) * cell * 0.5);
+            ctx.stroke();
+            // Enemies
+            ctx.fillStyle = '#ff3366';
+            enemies.forEach(e => {
+                ctx.fillRect(offsetX + e.x * cell - 2, offsetY + e.y * cell - 2, 4, 4);
+            });
+            // Upload to texture
+            hudMinimapTexture.needsUpdate = true;
+        }
+        function changeHealth(delta) {
+            player.health = Math.max(0, Math.min(player.maxHealth, player.health + delta));
+            if (player.health <= 0) {
+                onGameOver();
+            }
+        }
+        function onGameOver() {
+            gameRunning = false;
+            const overlay = document.createElement('div');
+            overlay.style.position = 'absolute';
+            overlay.style.left = '0';
+            overlay.style.top = '0';
+            overlay.style.right = '0';
+            overlay.style.bottom = '0';
+            overlay.style.background = 'rgba(0,0,0,0.6)';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.color = '#fff';
+            overlay.style.fontFamily = 'sans-serif';
+            overlay.style.fontSize = '28px';
+            overlay.textContent = 'Game Over';
+            uiContainer.appendChild(overlay);
+        }
         function updateSpriteAnimations() {
             // Animate interactive elements with subtle floating motion
             const time = Date.now() * 0.001; // Convert to seconds
@@ -3417,13 +4247,14 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                 }
             });
             // Pulse glow sprites
-            glowSprites.forEach((s, idx) => {
-                const base = 1.0 + Math.sin(time * 4.0 + idx) * 0.1;
-                s.scale.set(base, base, base);
+            glowSprites.forEach((s, idx) => { });
+            // Glint shimmer
+            glintSprites.forEach((s, idx) => {
+                const base = 0.8 + Math.sin(time * 3.0 + s.phase) * 0.2;
+                s.scale.set(base, base, 1);
                 const mat = s.material;
-                if (mat && mat.opacity !== undefined) {
-                    mat.opacity = 0.6 + Math.sin(time * 3.5 + idx) * 0.2;
-                }
+                if (mat)
+                    mat.opacity = 0.55 + Math.sin(time * 4.0 + s.phase) * 0.25;
             });
         }
         function isOccludedByWalls(targetX, targetY) {
@@ -3453,7 +4284,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                     return true; // outside map considered blocked
                 }
                 const element = currentGameMap[gridY][gridX];
-                const properties = colorMapping_3.getElementProperties(element);
+                const properties = colorMapping_4.getElementProperties(element);
                 if (!properties.walkable) {
                     // Hit a wall before reaching target
                     return true;
@@ -3476,7 +4307,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
                         const tx = Math.floor(player.x) + dx;
                         const ty = Math.floor(player.y) + dy;
                         if (ty >= 0 && ty < currentGameMap.length && tx >= 0 && tx < currentGameMap[0].length) {
-                            const properties = colorMapping_3.getElementProperties(currentGameMap[ty][tx]);
+                            const properties = colorMapping_4.getElementProperties(currentGameMap[ty][tx]);
                             if (properties.walkable) {
                                 const nx = tx + 0.5;
                                 const ny = ty + 0.5;
@@ -3603,21 +4434,27 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping"], function (
         }
         return component;
     }
-    exports_20("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
+    exports_22("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
     return {
         setters: [
-            function (colorMapping_3_1) {
-                colorMapping_3 = colorMapping_3_1;
+            function (colorMapping_4_1) {
+                colorMapping_4 = colorMapping_4_1;
+            },
+            function (terrain_1_1) {
+                terrain_1 = terrain_1_1;
+            },
+            function (proceduralSprites_1_1) {
+                proceduralSprites_1 = proceduralSprites_1_1;
             }
         ],
         execute: function () {
         }
     };
 });
-System.register("components/imageUploader", ["getImageData", "util", "components/common"], function (exports_21, context_21) {
+System.register("components/imageUploader", ["getImageData", "util", "components/common"], function (exports_23, context_23) {
     "use strict";
     var getImageData_2, util_6, common_5;
-    var __moduleName = context_21 && context_21.id;
+    var __moduleName = context_23 && context_23.id;
     function createImageUploader() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "imageUploaderComponent" }),
@@ -3762,7 +4599,7 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         ]);
         return component;
     }
-    exports_21("createImageUploader", createImageUploader);
+    exports_23("createImageUploader", createImageUploader);
     return {
         setters: [
             function (getImageData_2_1) {
@@ -3779,10 +4616,10 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "colorMapping"], function (exports_22, context_22) {
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "colorMapping"], function (exports_24, context_24) {
     "use strict";
-    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, colorMapping_4, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
-    var __moduleName = context_22 && context_22.id;
+    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, colorMapping_5, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
+    var __moduleName = context_24 && context_24.id;
     // Tab switching logic for input tabs
     function switchInputTab(activeTab, inactiveTabs, showElement) {
         // Remove active class from all tabs
@@ -3891,16 +4728,16 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         if (!generatedImageData)
             return;
         // Convert image to game map
-        gameMap = colorMapping_4.imageDataToGameMap(generatedImageData);
+        gameMap = colorMapping_5.imageDataToGameMap(generatedImageData);
         // Find player start position
-        const playerStart = colorMapping_4.findPlayerStart(gameMap);
+        const playerStart = colorMapping_5.findPlayerStart(gameMap);
         if (!playerStart) {
             alert("No player start position found! Please add a dark green (#006400) pixel to mark the start.");
             switchMode(AppMode.IMAGE_EDITING);
             return;
         }
         // Find player finish position
-        const playerFinish = colorMapping_4.findPlayerFinish(gameMap);
+        const playerFinish = colorMapping_5.findPlayerFinish(gameMap);
         if (!playerFinish) {
             alert("No player finish position found! Please add a dark red (#8B0000) pixel to mark the finish.");
             switchMode(AppMode.IMAGE_EDITING);
@@ -3940,8 +4777,8 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             function (imageUploader_1_1) {
                 imageUploader_1 = imageUploader_1_1;
             },
-            function (colorMapping_4_1) {
-                colorMapping_4 = colorMapping_4_1;
+            function (colorMapping_5_1) {
+                colorMapping_5 = colorMapping_5_1;
             }
         ],
         execute: function () {
@@ -4037,9 +4874,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
                 // Store the uploaded image as generated image data
                 generatedImageData = image;
                 // Check if the uploaded map has required start/finish points
-                const tempGameMap = colorMapping_4.imageDataToGameMap(image);
-                const playerStart = colorMapping_4.findPlayerStart(tempGameMap);
-                const playerFinish = colorMapping_4.findPlayerFinish(tempGameMap);
+                const tempGameMap = colorMapping_5.imageDataToGameMap(image);
+                const playerStart = colorMapping_5.findPlayerStart(tempGameMap);
+                const playerFinish = colorMapping_5.findPlayerFinish(tempGameMap);
                 if (!playerStart || !playerFinish) {
                     // Missing start or finish points - go to image editor first
                     const missingElements = [];

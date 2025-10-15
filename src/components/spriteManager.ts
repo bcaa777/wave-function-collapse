@@ -1,4 +1,5 @@
 // Sprite and texture management system
+import { generateProceduralSprite } from './proceduralSprites';
 export interface Sprite {
   image: HTMLImageElement;
   width: number;
@@ -42,7 +43,8 @@ export class SpriteManager {
         reject(new Error(`Failed to load sprite: ${filename}`));
       };
 
-      sprite.image.src = `${this.basePath}${filename}`;
+      // Support data URLs directly, otherwise load from basePath
+      sprite.image.src = filename.startsWith('data:') ? filename : `${this.basePath}${filename}`;
     });
   }
 
@@ -238,20 +240,11 @@ export class SpriteManager {
   async initializeDefaults(): Promise<void> {
     const loadPromises: Promise<any>[] = [];
 
-    // Load sprites for interactive elements
-    const spriteFiles = [
-      { name: 'enemy', file: 'enemy.png' },
-      { name: 'danger', file: 'danger.png' },
-      { name: 'finish', file: 'finish.png' },
-      { name: 'treasure', file: 'treasure.png' },
-      { name: 'key', file: 'key.png' },
-      { name: 'door', file: 'door.png' },
-      { name: 'stairs', file: 'stairs.png' },
-      { name: 'blade', file: 'blade.png' }
-    ];
-
-    for (const { name, file } of spriteFiles) {
-      loadPromises.push(this.loadSprite(name, file));
+    // Load sprites using procedural generator (replaces file-based placeholders)
+    const spriteKinds = ['enemy','danger','finish','treasure','key','door','stairs','blade'] as const;
+    for (const name of spriteKinds) {
+      const dataUrl = generateProceduralSprite(name);
+      loadPromises.push(this.loadSprite(name, dataUrl));
     }
 
     // Load textures for walls and floors

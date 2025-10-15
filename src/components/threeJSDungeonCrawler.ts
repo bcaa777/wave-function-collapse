@@ -1,6 +1,8 @@
 import { buildDomTree } from "../util";
 import { IComponent } from "./component";
 import { GameElement, getElementProperties } from "../colorMapping";
+import { buildHeightMap, sampleHeightBilinear, isWaterEdge } from './terrain';
+import { generateProceduralSprite } from './proceduralSprites';
 
 // Use global THREE object loaded from CDN
 declare const THREE: any;
@@ -58,6 +60,21 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
   let renderer: THREE.WebGLRenderer;
+  // UI container for mounting the renderer (no HTML overlays)
+  let uiContainer: HTMLDivElement;
+  // HUD rendered inside the 3D scene
+  let hudHealthCanvas: HTMLCanvasElement;
+  let hudHealthCtx: CanvasRenderingContext2D | null;
+  let hudHealthTexture: any; // THREE.CanvasTexture
+  let hudHealthSprite: any;  // THREE.Sprite
+  let hudMinimapCanvas: HTMLCanvasElement;
+  let hudMinimapCtx: CanvasRenderingContext2D | null;
+  let hudMinimapTexture: any; // THREE.CanvasTexture
+  let hudMinimapSprite: any;  // THREE.Sprite
+  // Fancy environment visuals
+  let waterMaterials: any[] = []; // THREE.ShaderMaterial[]
+  let grassSwaySprites: any[] = []; // THREE.Sprite[] with sway data
+  let glintSprites: any[] = []; // collectible shimmer sprites
   let animationId: number;
 
   // Postprocessing render targets and quad
@@ -72,6 +89,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
   // Game state
   let currentGameMap: GameElement[][] = [];
+  let heightMap: number[][] = [];
   let enemies: Enemy[] = [];
   let gameRunning = false;
 
@@ -113,6 +131,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
   // Particle system variables
   let particleSystems: Map<GameElement, THREE.Points[]> = new Map();
+  let transientSplashSystems: any[] = [];
+  let lastInWater = false;
+  let landingCooldown = 0;
   let fireLights: THREE.PointLight[] = [];
   const glowSprites: THREE.Sprite[] = [];
 
@@ -153,6 +174,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     await setupThreeJS();
 
     // Create the dungeon geometry
+    heightMap = buildHeightMap(currentGameMap);
     createDungeon();
 
     // In case the spawn is blocked, relocate to nearest walkable tile
@@ -187,6 +209,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     renderer.domElement.style.setProperty('image-rendering', 'pixelated');
     renderer.domElement.style.setProperty('image-rendering', 'crisp-edges');
     renderer.setPixelRatio(1);
+    // Enable shadow mapping
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Modern color and tone mapping
     if ((renderer as any).outputColorSpace !== undefined) {
@@ -196,6 +221,75 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     }
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
+    // UI container
+    uiContainer = document.createElement('div');
+    uiContainer.style.position = 'relative';
+    uiContainer.style.width = `${BASE_WIDTH * DISPLAY_SCALE}px`;
+    uiContainer.style.height = `${BASE_HEIGHT * DISPLAY_SCALE}px`;
+
+    // Mount renderer inside UI container
+    uiContainer.appendChild(renderer.domElement);
+    // component.domElement is typed as Node; cast to HTMLElement for DOM ops
+    const hostEl = component.domElement as unknown as HTMLElement;
+    hostEl.innerHTML = '';
+    hostEl.appendChild(uiContainer);
+
+    // Create HUD canvases (offscreen) and sprites attached to camera
+    // Health bar canvas
+    hudHealthCanvas = document.createElement('canvas');
+    hudHealthCanvas.width = 128;
+    hudHealthCanvas.height = 16;
+    hudHealthCtx = hudHealthCanvas.getContext('2d');
+    hudHealthTexture = new THREE.CanvasTexture(hudHealthCanvas);
+    hudHealthTexture.magFilter = THREE.NearestFilter;
+    hudHealthTexture.minFilter = THREE.NearestFilter;
+    hudHealthTexture.generateMipmaps = false;
+    const hbMat = new THREE.SpriteMaterial({ map: hudHealthTexture, transparent: true, depthWrite: false });
+    hudHealthSprite = new THREE.Sprite(hbMat);
+    hudHealthSprite.scale.set(0.9, 0.12, 1);
+    hudHealthSprite.position.set(0, -0.68, -1.1);
+    (hudHealthSprite as any).renderOrder = 9999;
+    (hudHealthSprite.material as any).depthTest = false;
+    (hudHealthSprite.material as any).depthWrite = false;
+    camera.add(hudHealthSprite);
+    scene.add(camera); // ensure camera is in scene for children rendering
+
+    // Minimap canvas
+    hudMinimapCanvas = document.createElement('canvas');
+    hudMinimapCanvas.width = 128;
+    hudMinimapCanvas.height = 128;
+    hudMinimapCtx = hudMinimapCanvas.getContext('2d');
+    hudMinimapTexture = new THREE.CanvasTexture(hudMinimapCanvas);
+    hudMinimapTexture.magFilter = THREE.NearestFilter;
+    hudMinimapTexture.minFilter = THREE.NearestFilter;
+    hudMinimapTexture.generateMipmaps = false;
+    const mmMat = new THREE.SpriteMaterial({ map: hudMinimapTexture, transparent: true, depthWrite: false });
+    hudMinimapSprite = new THREE.Sprite(mmMat);
+    hudMinimapSprite.scale.set(0.42, 0.42, 1);
+    hudMinimapSprite.position.set(0.8, 0.55, -1.2);
+    (hudMinimapSprite as any).renderOrder = 9999;
+    (hudMinimapSprite.material as any).depthTest = false;
+    (hudMinimapSprite.material as any).depthWrite = false;
+    camera.add(hudMinimapSprite);
+
+    // Blue overlay for underwater effect (hidden by default)
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = 64; overlayCanvas.height = 64; // tiny, pixelated
+    const octx = overlayCanvas.getContext('2d');
+    if (octx) {
+      octx.fillStyle = 'rgba(0,0,0,0)';
+      octx.fillRect(0,0,64,64);
+    }
+    const overlayTex = new THREE.CanvasTexture(overlayCanvas);
+    overlayTex.magFilter = THREE.NearestFilter; overlayTex.minFilter = THREE.NearestFilter; overlayTex.generateMipmaps = false;
+    const overlayMat = new THREE.SpriteMaterial({ map: overlayTex, transparent: true, depthTest: false, depthWrite: false });
+    const overlaySprite = new THREE.Sprite(overlayMat);
+    overlaySprite.scale.set(1.6, 0.9, 1);
+    overlaySprite.position.set(0, 0, -0.9);
+    (overlaySprite as any).renderOrder = 10000;
+    camera.add(overlaySprite);
+    // Store for updates
+    (scene as any).waterOverlay = { canvas: overlayCanvas, ctx: octx, texture: overlayTex, sprite: overlaySprite };
     renderer.useLegacyLights = false;
 
     // Advanced lighting system
@@ -402,14 +496,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
   function setupLighting(): void {
     // Ambient and hemisphere fill for general visibility
-    const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x404040, 0.6);
+    const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x404040, 0.9);
     scene.add(hemi);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.35);
     scene.add(ambient);
 
     // Player torch light (follows player)
-    const playerTorch = new THREE.PointLight(0xffc866, 2.2, 18);
+    const playerTorch = new THREE.PointLight(0xffc866, 5.0, 16);
     playerTorch.position.set(player.x, 1.5, player.y);
     playerTorch.castShadow = true;
 
@@ -453,8 +547,8 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   }
 
   function createFloor(width: number, height: number): void {
-    // Create floor geometry
-    const floorGeometry = new THREE.PlaneGeometry(width, height);
+    // Create a height-aware floor using a grid of segments
+    const floorGeometry = new THREE.PlaneGeometry(width, height, width, height);
 
     // Load floor texture
     const floorTexture = textureLoader.load('textures/floor_stone.png');
@@ -478,6 +572,21 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       emissive: new THREE.Color(0x1a1a1a),
       emissiveIntensity: 0.08
     });
+
+    // Apply per-vertex heights from heightMap
+    const pos = floorGeometry.attributes.position;
+    for (let y = 0; y <= height; y++) {
+      for (let x = 0; x <= width; x++) {
+        const idx = (y * (width + 1) + x) * 3;
+        // PlaneGeometry is centered; offset to grid space
+        const gx = x - 0.5;
+        const gy = y - 0.5;
+        const h = sampleHeightBilinear(heightMap, gx, gy);
+        // Before rotation, z becomes world Y after we rotate floor by -PI/2
+        pos.array[idx + 2] = h;
+      }
+    }
+    pos.needsUpdate = true;
 
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
@@ -557,7 +666,8 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     const wall = new THREE.Mesh(wallGeometry, wallMaterial);
     // Position wall at grid coordinates (x, y)
-    wall.position.set(x, WALL_HEIGHT / 2, y);
+    const groundH = sampleHeightBilinear(heightMap, x, y);
+    wall.position.set(x, groundH + WALL_HEIGHT / 2, y);
     wall.castShadow = true;
     wall.receiveShadow = true;
     wall.rotation.y = 0;
@@ -636,6 +746,20 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
         // Skip WALL since walls are handled by createWalls()
         if (element !== GameElement.WALL && element !== GameElement.FLOOR) {
           createSprite(x, y, element);
+          // Add collectible glint shimmer for treasures and keys
+          if (element === GameElement.TREASURE || element === GameElement.KEY) {
+            const tex = new THREE.TextureLoader().load(generateProceduralSprite('treasure'));
+            tex.minFilter = THREE.NearestFilter; tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+            const mat = new THREE.SpriteMaterial({ map: tex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7 });
+            const s = new THREE.Sprite(mat);
+            const h = sampleHeightBilinear(heightMap, x, y);
+            s.position.set(x, h + 0.9, y);
+            s.scale.set(0.5, 0.5, 1);
+            (s as any).glint = true;
+            (s as any).phase = Math.random() * Math.PI * 2;
+            scene.add(s);
+            glintSprites.push(s);
+          }
         }
       }
     }
@@ -646,21 +770,36 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     if (spritePath) {
       // Create sprite with texture
-      const texture = textureLoader.load(spritePath);
+      // Support data URLs returned by generator
+      const texture = spritePath.startsWith('data:') ? new THREE.TextureLoader().load(spritePath) : textureLoader.load(spritePath);
+      // Make pixel art crisp and avoid blurry squares
+      if (texture) {
+        if ((texture as any).colorSpace !== undefined) {
+          (texture as any).colorSpace = THREE.SRGBColorSpace;
+        } else if ((texture as any).encoding !== undefined) {
+          (texture as any).encoding = THREE.sRGBEncoding;
+        }
+        texture.minFilter = THREE.NearestFilter;
+        texture.magFilter = THREE.NearestFilter;
+        texture.generateMipmaps = false;
+        texture.needsUpdate = true;
+      }
       const spriteMaterial = new THREE.SpriteMaterial({
         map: texture,
         transparent: true,
-        fog: true
+        fog: true,
+        depthWrite: false,
+        alphaTest: 0.05
       });
       const sprite = new THREE.Sprite(spriteMaterial);
-      sprite.position.set(x, 1, y);
-      sprite.scale.set(0.8, 0.8, 0.8);
+      sprite.position.set(x, 0.9, y);
+      sprite.scale.set(0.6, 0.6, 0.6);
       scene.add(sprite);
 
       // Add emissive glow for certain elements
-      if (element === GameElement.FIRE || element === GameElement.TREASURE) {
+      if (false && (element === GameElement.FIRE || element === GameElement.TREASURE)) {
         const glowColor = element === GameElement.FIRE ? 0xffa200 : 0xffee66;
-        const glowTex = textureLoader.load('sprites/treasure.png');
+        const glowTex = new THREE.TextureLoader().load(generateProceduralSprite(element === GameElement.FIRE ? 'fire' : 'treasure'));
         const glowMat = new THREE.SpriteMaterial({
           map: glowTex,
           color: glowColor,
@@ -668,14 +807,26 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           fog: true,
-          opacity: 0.8
+          opacity: element === GameElement.FIRE ? 0.5 : 0.65
         });
         const glow = new THREE.Sprite(glowMat);
-        glow.position.set(x, 1, y);
-        glow.scale.set(1.1, 1.1, 1.1);
+        glow.position.set(x, 0.95, y);
+        glow.scale.set(0.9, 0.9, 0.9);
         (glow as any).pulse = true;
         scene.add(glow);
         glowSprites.push(glow);
+      }
+      // For environment tiles, prefer custom ground visuals only (no hovering icons)
+      if (element === GameElement.GRASS || element === GameElement.WATER || element === GameElement.DANGER || element === GameElement.FIRE) {
+        // Remove the sprite we just created and use ground visuals instead
+        scene.remove(sprite);
+        if (element === GameElement.FIRE || element === GameElement.DANGER) {
+          // Keep only ground tile; no glow sprite for now
+          createColoredQuad(x, y, element);
+        } else {
+          createColoredQuad(x, y, element);
+        }
+        return;
       }
     } else {
       // Create colored quad for elements without sprites
@@ -684,27 +835,70 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   }
 
   function createColoredQuad(x: number, y: number, element: GameElement): void {
-    // Create a simple colored plane for elements without sprites
-    const geometry = new THREE.PlaneGeometry(0.8, 0.8);
-    const material = new THREE.MeshBasicMaterial({
-      color: getElementColor(element),
-      transparent: true,
-      opacity: 0.7,
-      side: THREE.DoubleSide,
-      fog: true
-    });
+    // Artistic ground tiles for grass/water
+    const size = 0.96;
+    const base = new THREE.PlaneGeometry(size, size, 1, 1);
+    const color = getElementColor(element);
+    const baseMat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.0, transparent: true, opacity: 0.9, side: THREE.DoubleSide, fog: true });
+    const tile = new THREE.Mesh(base, baseMat);
+    const groundH = sampleHeightBilinear(heightMap, x, y);
+    tile.position.set(x, groundH + 0.01, y);
+    tile.rotation.x = -Math.PI / 2;
+    tile.receiveShadow = true;
+    scene.add(tile);
 
-    const quad = new THREE.Mesh(geometry, material);
-    quad.position.set(x, 0.1, y); // Slightly above ground
-    quad.rotation.x = -Math.PI / 2; // Lay flat on ground
+    if (element === GameElement.GRASS) {
+      // Add 3 swaying grass blades as sprites
+      for (let i = 0; i < 3; i++) {
+        const tex = new THREE.TextureLoader().load(generateProceduralSprite('grass'));
+        tex.minFilter = THREE.NearestFilter; tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true, alphaTest: 0.05 });
+        const s = new THREE.Sprite(mat);
+        s.position.set(x + (Math.random() - 0.5) * 0.5, groundH + 0.12, y + (Math.random() - 0.5) * 0.5);
+        s.scale.set(0.35, 0.35, 1);
+        (s as any).swayPhase = Math.random() * Math.PI * 2;
+        (s as any).castShadow = true;
+        scene.add(s);
+        grassSwaySprites.push(s);
+      }
+    } else if (element === GameElement.WATER) {
+      // Add shimmered water surface using simple shader
+      const waterGeo = new THREE.PlaneGeometry(size, size, 16, 16);
+      const waterMat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0x4aa3ff) } },
+        vertexShader: `
+          uniform float time;
+          void main() {
+            vec3 p = position;
+            p.z += sin((position.x + position.y) * 6.0 + time * 2.0) * 0.02;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 baseColor;
+          void main(){
+            gl_FragColor = vec4(baseColor, 0.85);
+          }
+        `,
+        transparent: true,
+        depthWrite: false
+      });
+      const water = new THREE.Mesh(waterGeo, waterMat);
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(x, groundH + 0.03, y);
+      water.receiveShadow = true; // catch soft caustic shadows from scene lights
+      scene.add(water);
+      waterMaterials.push(waterMat);
 
-    // Add subtle animation for interactive elements
-    if (getElementProperties(element).interactive) {
-      quad.userData = { originalY: 0.1, element };
-      (quad as any).animate = true;
+      // Foam ring for water edges
+      if (isWaterEdge(currentGameMap, Math.floor(x), Math.floor(y))) {
+        const foam = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.48, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+        foam.rotation.x = -Math.PI / 2;
+        foam.position.set(x, groundH + 0.035, y);
+        foam.renderOrder = 3;
+        scene.add(foam);
+      }
     }
-
-    scene.add(quad);
   }
 
   function createParticleEffects(): void {
@@ -713,6 +907,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       systems.forEach(system => scene.remove(system));
     });
     particleSystems.clear();
+    // Clear transient splashes
+    transientSplashSystems.forEach(sys => scene.remove(sys));
+    transientSplashSystems = [];
 
     // Clear existing fire lights
     fireLights.forEach(light => scene.remove(light));
@@ -867,7 +1064,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   }
 
   function createFireLight(x: number, y: number): void {
-    const fireLight = new THREE.PointLight(0xffaa44, 0.7, 7);
+    const fireLight = new THREE.PointLight(0xffaa44, 1.1, 8);
     fireLight.position.set(x, 0.8, y);
     fireLight.castShadow = false; // Don't cast shadows to avoid performance issues
 
@@ -909,6 +1106,29 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       const flicker = Math.sin(time * 8 + index) * 0.2 + Math.sin(time * 12 + index * 2) * 0.1;
       light.intensity = baseIntensity + flicker;
     });
+
+    // Update water shader time
+    waterMaterials.forEach((mat: any) => {
+      if (mat.uniforms && mat.uniforms.time) {
+        mat.uniforms.time.value = time;
+      }
+    });
+
+    // Grass sway
+    grassSwaySprites.forEach((s: any, idx: number) => {
+      const phase = s.swayPhase || 0;
+      s.rotation.z = Math.sin(time * 2.0 + phase) * 0.08;
+    });
+
+    // Remove expired splash systems
+    transientSplashSystems = transientSplashSystems.filter((sys: any) => {
+      sys.userData.life -= 0.016;
+      if (sys.userData.life <= 0) {
+        scene.remove(sys);
+        return false;
+      }
+      return true;
+    });
   }
 
   function getElementColor(element: GameElement): number {
@@ -931,25 +1151,25 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   function getSpritePath(element: GameElement): string | null {
     switch (element) {
       case GameElement.ENEMY:
-        return 'sprites/enemy.png';
+        return generateProceduralSprite('enemy');
       case GameElement.DANGER:
-        return 'sprites/danger.png';
+        return generateProceduralSprite('danger');
       case GameElement.PLAYER_FINISH:
-        return 'sprites/finish.png';
+        return generateProceduralSprite('finish');
       case GameElement.TREASURE:
-        return 'sprites/treasure.png';
+        return generateProceduralSprite('treasure');
       case GameElement.KEY:
-        return 'sprites/key.png';
+        return generateProceduralSprite('key');
       case GameElement.DOOR:
-        return 'sprites/door.png';
+        return generateProceduralSprite('door');
       case GameElement.STAIRS:
-        return 'sprites/stairs.png';
+        return generateProceduralSprite('stairs');
       case GameElement.FIRE:
-        return 'sprites/blade.png'; // Use blade sprite for fire
+        return generateProceduralSprite('fire');
       case GameElement.GRASS:
-        return null; // Will create colored quad instead
+        return generateProceduralSprite('grass');
       case GameElement.WATER:
-        return null; // Will create colored quad instead
+        return generateProceduralSprite('water');
       case GameElement.PLAYER_START:
         return null; // Will create colored quad instead
       default:
@@ -1017,17 +1237,31 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       mouseX = 0; // Reset mouse movement
     }
 
-    // Check collision and update position
+    // Water slow and swimming bobbing
+    const tileX = Math.floor(newX);
+    const tileY = Math.floor(newY);
+    const inBounds = tileY >= 0 && tileY < currentGameMap.length && tileX >= 0 && tileX < currentGameMap[0].length;
+    const inWater = inBounds && currentGameMap[tileY][tileX] === GameElement.WATER;
+    const speedMultiplier = inWater ? 0.55 : 1.0;
+    const groundH = sampleHeightBilinear(heightMap, newX, newY);
+    const waterDepth = inWater ? Math.max(0, (0.0 - groundH) + 0.35) : 0;
+
+    // Check collision and update position with speed multiplier
+    const prevX = player.x;
+    const prevY = player.y;
     if (isValidPosition(newX, newY)) {
-      player.x = newX;
-      player.y = newY;
+      player.x += (newX - player.x) * speedMultiplier;
+      player.y += (newY - player.y) * speedMultiplier;
     } else {
       // Try to slide along walls if direct movement is blocked
       trySlideAlongWalls(newX, newY);
     }
 
-    // Update camera position
-    camera.position.set(player.x, 1, player.y);
+    // Update camera position with swim bob and terrain height
+    const swimBob = inWater ? (Math.sin(Date.now() * 0.006) * 0.08) : 0;
+    const baseEye = 1 + groundH; // eye follows local terrain
+    const buoyancy = inWater ? Math.min(0.5, waterDepth * 0.6) : 0;
+    camera.position.set(player.x, baseEye - buoyancy + swimBob, player.y);
     const lookX = player.x + Math.cos(player.angle) * 2;
     const lookZ = player.y + Math.sin(player.angle) * 2;
     camera.lookAt(lookX, 1, lookZ);
@@ -1039,6 +1273,84 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       const t = Date.now() * 0.002;
       torch.intensity = 2.0 + Math.sin(t * 3.2) * 0.2 + Math.sin(t * 5.7) * 0.1;
     }
+
+    // Detect water enter/exit for splashes
+    if (inWater && !lastInWater) {
+      spawnWaterSplash(player.x, player.y);
+      playSplashSound();
+    }
+    lastInWater = inWater;
+
+    // Landing dust puff when quick stop on floor (cooldown to avoid spam)
+    landingCooldown = Math.max(0, landingCooldown - 0.016);
+    const speed = Math.hypot(player.x - prevX, player.y - prevY);
+    if (!inWater && speed < 0.0005 && landingCooldown <= 0 && (keysPressed.has('keys') || keysPressed.has('arrowdown'))) {
+      spawnDustPuff(player.x, player.y);
+      landingCooldown = 0.4;
+    }
+  }
+
+  function spawnWaterSplash(x: number, y: number) {
+    const count = 20;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.35;
+      positions[i*3] = x + Math.cos(a) * r;
+      positions[i*3+1] = 0.1 + Math.random() * 0.2;
+      positions[i*3+2] = y + Math.sin(a) * r;
+      colors[i*3] = 0.4; colors[i*3+1] = 0.7; colors[i*3+2] = 1.0;
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({ size: 0.08, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false });
+    const points = new THREE.Points(geometry, material);
+    points.userData.life = 0.5; // seconds
+    scene.add(points);
+    transientSplashSystems.push(points);
+  }
+
+  function spawnDustPuff(x: number, y: number) {
+    const count = 14;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.25;
+      positions[i*3] = x + Math.cos(a) * r;
+      positions[i*3+1] = 0.05 + Math.random() * 0.1;
+      positions[i*3+2] = y + Math.sin(a) * r;
+      const c = 0.7 + Math.random() * 0.2;
+      colors[i*3] = c; colors[i*3+1] = c; colors[i*3+2] = c;
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({ size: 0.07, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false });
+    const points = new THREE.Points(geometry, material);
+    points.userData.life = 0.35;
+    scene.add(points);
+    transientSplashSystems.push(points);
+  }
+
+  // Simple WebAudio splash synth
+  function playSplashSound() {
+    try {
+      const ctx = (window as any).audioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
+      (window as any).audioCtx = ctx;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(600, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(180, ctx.currentTime + 0.25);
+      g.gain.setValueAtTime(0.15, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+      o.connect(g).connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + 0.4);
+    } catch {}
   }
 
   function isValidPosition(x: number, y: number): boolean {
@@ -1348,6 +1660,9 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     if (!gameRunning) return;
 
     updatePlayer();
+    applyTileEffects();
+    updateUI();
+    drawMinimap();
     updateDebugVisualization();
     updateSpriteAnimations();
     updateParticleEffects();
@@ -1371,6 +1686,146 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     animationId = requestAnimationFrame(gameLoop);
   }
 
+  function applyTileEffects(): void {
+    const tileX = Math.floor(player.x);
+    const tileY = Math.floor(player.y);
+    if (tileX < 0 || tileY < 0 || tileY >= currentGameMap.length || tileX >= currentGameMap[0].length) return;
+    const element = currentGameMap[tileY][tileX];
+
+    // Fire and danger damage
+    if (element === GameElement.FIRE || element === GameElement.DANGER) {
+      changeHealth(-0.25); // damage per frame at ~60fps ~15 hp/s
+    }
+  }
+
+  function updateUI(): void {
+    // Draw pixelated health bar to HUD canvas
+    if (!hudHealthCtx) return;
+    const ctx = hudHealthCtx;
+    const w = hudHealthCanvas.width;
+    const h = hudHealthCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    // Frame
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, w - 2, h - 2);
+    // Bar
+    const pct = Math.max(0, Math.min(1, player.health / player.maxHealth));
+    const barW = Math.floor((w - 6) * pct);
+    const grad = ctx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, '#ff3b3b');
+    grad.addColorStop(1, '#ff7a3b');
+    ctx.fillStyle = grad;
+    ctx.fillRect(3, 3, barW, h - 6);
+    // Upload to texture
+    hudHealthTexture.needsUpdate = true;
+
+    // Water overlay update (underwater tint when in water tile)
+    const tileX = Math.floor(player.x);
+    const tileY = Math.floor(player.y);
+    const inBounds = tileY >= 0 && tileY < currentGameMap.length && tileX >= 0 && tileX < currentGameMap[0].length;
+    const inWater = inBounds && currentGameMap[tileY][tileX] === GameElement.WATER;
+    const overlay = (scene as any).waterOverlay;
+    if (overlay && overlay.ctx) {
+      const c = overlay.canvas as HTMLCanvasElement;
+      const octx = overlay.ctx as CanvasRenderingContext2D;
+      octx.clearRect(0, 0, c.width, c.height);
+      if (inWater) {
+        octx.fillStyle = 'rgba(50,120,220,0.28)';
+        octx.fillRect(0, 0, c.width, c.height);
+      }
+      overlay.texture.needsUpdate = true;
+      overlay.sprite.visible = inWater;
+    }
+  }
+
+  function drawMinimap(): void {
+    if (!hudMinimapCtx) return;
+    const ctx = hudMinimapCtx;
+    const w = hudMinimapCanvas.width;
+    const h = hudMinimapCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+    if (!currentGameMap.length) return;
+
+    const cols = currentGameMap[0].length;
+    const rows = currentGameMap.length;
+    const cell = Math.min(Math.floor(w / cols), Math.floor(h / rows));
+    const offsetX = Math.floor((w - cols * cell) / 2);
+    const offsetY = Math.floor((h - rows * cell) / 2);
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const el = currentGameMap[y][x];
+        let color = '#2d2f3a';
+        switch (el) {
+          case GameElement.WALL: color = '#555a66'; break;
+          case GameElement.WATER: color = '#3a7bd9'; break;
+          case GameElement.GRASS: color = '#3bbf6a'; break;
+          case GameElement.FIRE: color = '#ff7a1a'; break;
+          case GameElement.DANGER: color = '#ff3366'; break;
+          case GameElement.DOOR: color = '#8e5a3c'; break;
+          case GameElement.STAIRS: color = '#cfd3d6'; break;
+          default: color = '#2d2f3a';
+        }
+        ctx.fillStyle = color;
+        ctx.fillRect(offsetX + x * cell, offsetY + y * cell, cell, cell);
+      }
+    }
+
+    // Player
+    ctx.fillStyle = '#ffffff';
+    const px = offsetX + player.x * cell;
+    const py = offsetY + player.y * cell;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(2, cell * 0.18), 0, Math.PI * 2);
+    ctx.fill();
+    // Facing indicator
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1, Math.floor(cell * 0.08));
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.cos(player.angle) * cell * 0.5, py + Math.sin(player.angle) * cell * 0.5);
+    ctx.stroke();
+
+    // Enemies
+    ctx.fillStyle = '#ff3366';
+    enemies.forEach(e => {
+      ctx.fillRect(offsetX + e.x * cell - 2, offsetY + e.y * cell - 2, 4, 4);
+    });
+
+    // Upload to texture
+    hudMinimapTexture.needsUpdate = true;
+  }
+
+  function changeHealth(delta: number): void {
+    player.health = Math.max(0, Math.min(player.maxHealth, player.health + delta));
+    if (player.health <= 0) {
+      onGameOver();
+    }
+  }
+
+  function onGameOver(): void {
+    gameRunning = false;
+    const overlay = document.createElement('div');
+    overlay.style.position = 'absolute';
+    overlay.style.left = '0';
+    overlay.style.top = '0';
+    overlay.style.right = '0';
+    overlay.style.bottom = '0';
+    overlay.style.background = 'rgba(0,0,0,0.6)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.color = '#fff';
+    overlay.style.fontFamily = 'sans-serif';
+    overlay.style.fontSize = '28px';
+    overlay.textContent = 'Game Over';
+    uiContainer.appendChild(overlay);
+  }
+
   function updateSpriteAnimations(): void {
     // Animate interactive elements with subtle floating motion
     const time = Date.now() * 0.001; // Convert to seconds
@@ -1386,13 +1841,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     });
 
     // Pulse glow sprites
-    glowSprites.forEach((s, idx) => {
-      const base = 1.0 + Math.sin(time * 4.0 + idx) * 0.1;
-      s.scale.set(base, base, base);
+    glowSprites.forEach((s, idx) => { /* glow disabled */ });
+
+    // Glint shimmer
+    glintSprites.forEach((s: any, idx: number) => {
+      const base = 0.8 + Math.sin(time * 3.0 + s.phase) * 0.2;
+      s.scale.set(base, base, 1);
       const mat = s.material as any;
-      if (mat && mat.opacity !== undefined) {
-        mat.opacity = 0.6 + Math.sin(time * 3.5 + idx) * 0.2;
-      }
+      if (mat) mat.opacity = 0.55 + Math.sin(time * 4.0 + s.phase) * 0.25;
     });
   }
 
