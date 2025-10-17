@@ -2,11 +2,14 @@
 import { IWaveFunctionCollapse, createWaveFunctionCollapse } from "./wfc/run";
 import { buildDomTree } from "./util";
 import { createWfcOptions } from "./components/wfcOptions";
+import { createSettingsPanel } from "./components/settingsPanel";
+import { getSettings, onSettingsChange, setSetting } from "./gameSettings";
 import { createPresetPicker } from "./components/presetPicker";
 import { createDrawingCanvas } from "./components/drawingCanvas";
 import { createImageEditor } from "./components/imageEditor";
 import { createThreeJSDungeonCrawler } from "./components/threeJSDungeonCrawler";
 import { createImageUploader } from "./components/imageUploader";
+import { createAssetManager } from "./components/assetManager";
 import { imageDataToGameMap, findPlayerStart, findPlayerFinish, GameElement } from "./colorMapping";
 
 let wfc: IWaveFunctionCollapse | undefined;
@@ -84,6 +87,9 @@ gameModeTab.className = "modeTab";
 const contentContainer = document.createElement("div");
 contentContainer.className = "contentContainer";
 
+// Global settings panel
+const settingsPanel = createSettingsPanel();
+
 // Input mode content
 const inputTabContainer = document.createElement("div");
 inputTabContainer.className = "tabContainer";
@@ -149,6 +155,7 @@ imageUploader.onUploadComplete = (image) => {
 
 // Image editor
 const imageEditor = createImageEditor();
+imageEditor.domElement.classList.add('card');
 imageEditor.onEditComplete = (image) => {
   generatedImageData = image;
   switchMode(AppMode.DUNGEON_CRAWLER);
@@ -219,15 +226,25 @@ function switchMode(newMode: AppMode) {
 }
 
 function buildInputMode() {
+  const assetsBtn = document.createElement('button');
+  assetsBtn.className = 'btn btn-secondary ms-2';
+  assetsBtn.textContent = 'Assets';
+  assetsBtn.onclick = () => {
+    contentContainer.innerHTML = '';
+    contentContainer.appendChild(settingsPanel.domElement);
+    const assets = createAssetManager();
+    contentContainer.appendChild(assets.domElement);
+  };
+
   buildDomTree(contentContainer, [
-    document.createElement("h2"), ["Input bitmap"],
+    settingsPanel.domElement,
     inputTabContainer, [
       presetTab,
       drawTab,
       uploadTab,
+      assetsBtn,
     ],
     inputContainer,
-    document.createElement("h2"), ["Options"],
     wfcOptions.domElement,
   ]);
 
@@ -261,9 +278,12 @@ function buildWFCGenerationMode() {
     switchMode(AppMode.IMAGE_EDITING);
   };
 
+  const actions = document.createElement("div");
+  actions.className = "toolbar";
+
   buildDomTree(contentContainer, [
-    document.createElement("h2"), ["Wave Function Collapse Generation"],
-    document.createElement("div"), [
+    settingsPanel.domElement,
+    actions, [
       restartWfc,
       downloadButton,
       editImageButton,
@@ -278,7 +298,7 @@ function buildImageEditingMode() {
   }
 
   buildDomTree(contentContainer, [
-    document.createElement("h2"), ["Edit Generated Image"],
+    settingsPanel.domElement,
     document.createElement("p"), [
       "Use the drawing tools to add player start (dark green) and finish (dark red) points, polish routes, and adjust the dungeon layout."
     ],
@@ -288,7 +308,7 @@ function buildImageEditingMode() {
 
 function buildDungeonCrawlerMode() {
   buildDomTree(contentContainer, [
-    document.createElement("h2"), ["Dungeon Crawler Game"],
+    settingsPanel.domElement,
     dungeonCrawler.domElement,
   ]);
 }
@@ -334,7 +354,6 @@ const mainElem = document.querySelector("main");
 if (mainElem) {
   buildDomTree(
     mainElem, [
-      document.createElement("h2"), ["Wave Function Collapse Dungeon Generator"],
       modeTabContainer, [
         inputModeTab,
         wfcModeTab,

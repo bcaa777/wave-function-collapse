@@ -5,7 +5,7 @@ export interface IStringLike {
 
 type domChild = Node | IStringLike;
 
-export function buildDomTree(parent: Node, children: Array<domChild | domChild[]>): Node {
+export function buildDomTree<T extends Node>(parent: T, children: Array<domChild | domChild[]>): T {
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     if (child instanceof Array) {

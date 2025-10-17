@@ -138,4 +138,53 @@ export function isWaterEdge(map: GameElement[][], x: number, y: number): boolean
   return false;
 }
 
+// Build per-tile ceiling height map. Returns absolute world Y values for the ceiling surface.
+export function buildCeilingMap(gameMap: GameElement[][], floorHeights: number[][]): number[][] {
+  const rows = gameMap.length;
+  const cols = gameMap[0].length;
+  const ceilings: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+  // Use noise for gentle vaulting; widen over water, tighten over danger
+  const noise = createSimplexLikeNoise(4242);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const nx = x / Math.max(1, cols);
+      const ny = y / Math.max(1, rows);
+      const base = 2.3; // base clearance in meters
+      const n = noise(nx * 1.5, ny * 1.5) * 0.5; // -0.5..0.5
+      let extra = 0.0;
+      const el = gameMap[y][x];
+      if (el === GameElement.WATER) extra += 0.4; // taller cavern over water
+      if (el === GameElement.DANGER || el === GameElement.FIRE) extra -= 0.2; // tighter, oppressive feel
+
+      const minGap = 1.8;
+      const maxGap = 3.3;
+      const desiredGap = clamp(base + n + extra, minGap, maxGap);
+      ceilings[y][x] = floorHeights[y][x] + desiredGap;
+    }
+  }
+
+  // Soft blur to avoid harsh steps
+  const out: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let sum = 0; let count = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (ny>=0 && ny<rows && nx>=0 && nx<cols) { sum += ceilings[ny][nx]; count++; }
+        }
+      }
+      out[y][x] = sum / Math.max(1, count);
+    }
+  }
+  return out;
+}
+
+export function sampleCeilingBilinear(ceilings: number[][], x: number, y: number): number {
+  return sampleHeightBilinear(ceilings, x, y);
+}
+
+function clamp(v: number, a: number, b: number) { return Math.max(a, Math.min(b, v)); }
+
 

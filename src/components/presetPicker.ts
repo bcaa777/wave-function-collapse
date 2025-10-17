@@ -13,7 +13,7 @@ interface IComponentPresetPicker extends IComponent {
 export function createPresetPicker(): IComponentPresetPicker {
 
   const presetPicker: IComponentPresetPicker = {
-    domElement: Object.assign(document.createElement("div"), { className: "presetPickerComponent" }),
+    domElement: Object.assign(document.createElement("div"), { className: "presetPickerComponent card" }),
   };
 
   const onPick = (image: ImageData, options: Partial<IWfcOptions>) => {

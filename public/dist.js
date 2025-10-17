@@ -729,7 +729,7 @@ System.register("components/wfcOptions", ["util", "components/inputs", "componen
     var __moduleName = context_12 && context_12.id;
     function createWfcOptions() {
         const domElement = document.createElement("div");
-        domElement.className = "wfcInputComponent";
+        domElement.className = "wfcInputComponent card";
         const components = {
             N: inputs_1.createRadioInput("Pattern size", [
                 { label: "2", value: 2 },
@@ -761,8 +761,7 @@ System.register("components/wfcOptions", ["util", "components/inputs", "componen
         }
         const wfcOptions = {
             domElement: util_2.buildDomTree(domElement, [
-                document.createElement("fieldset"), [
-                    document.createElement("legend"), ["Input Bitmap"],
+                document.createElement("div"), [
                     common_1.inputGroup(), [
                         components.periodicInput.domElement,
                     ],
@@ -776,8 +775,7 @@ System.register("components/wfcOptions", ["util", "components/inputs", "componen
                         components.ground.domElement,
                     ],
                 ],
-                document.createElement("fieldset"), [
-                    document.createElement("legend"), ["Output Bitmap"],
+                document.createElement("div"), [
                     common_1.inputGroup(), [
                         components.periodicOutput.domElement,
                     ],
@@ -834,9 +832,111 @@ System.register("components/wfcOptions", ["util", "components/inputs", "componen
         }
     };
 });
-System.register("getImageData", [], function (exports_13, context_13) {
+System.register("gameSettings", [], function (exports_13, context_13) {
     "use strict";
+    var settings, listeners;
     var __moduleName = context_13 && context_13.id;
+    function getSettings() {
+        return settings;
+    }
+    exports_13("getSettings", getSettings);
+    function setSetting(key, value) {
+        settings[key] = value;
+        listeners.forEach(l => l(key, value));
+    }
+    exports_13("setSetting", setSetting);
+    function onSettingsChange(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+    }
+    exports_13("onSettingsChange", onSettingsChange);
+    function setSpriteOverride(name, url) {
+        settings.spriteOverrides.set(name, url);
+        listeners.forEach(l => l('spriteOverrides', settings.spriteOverrides));
+    }
+    exports_13("setSpriteOverride", setSpriteOverride);
+    function setTextureOverride(name, url) {
+        settings.textureOverrides.set(name, url);
+        listeners.forEach(l => l('textureOverrides', settings.textureOverrides));
+    }
+    exports_13("setTextureOverride", setTextureOverride);
+    return {
+        setters: [],
+        execute: function () {
+            settings = {
+                playerLightIntensity: 5.0,
+                postProcessingEnabled: false,
+                paletteMode: 0,
+                useProceduralSprites: true,
+                spriteOverrides: new Map(),
+                textureOverrides: new Map()
+            };
+            listeners = new Set();
+        }
+    };
+});
+System.register("components/settingsPanel", ["gameSettings"], function (exports_14, context_14) {
+    "use strict";
+    var gameSettings_1;
+    var __moduleName = context_14 && context_14.id;
+    function createSettingsPanel() {
+        const el = Object.assign(document.createElement('div'), { className: 'settingsPanel' });
+        const component = { domElement: el };
+        const s = gameSettings_1.getSettings();
+        const lightInput = document.createElement('input');
+        lightInput.type = 'range';
+        lightInput.min = '0';
+        lightInput.max = '10';
+        lightInput.step = '0.1';
+        lightInput.value = String(s.playerLightIntensity);
+        lightInput.oninput = () => gameSettings_1.setSetting('playerLightIntensity', parseFloat(lightInput.value));
+        const postToggle = document.createElement('input');
+        postToggle.type = 'checkbox';
+        postToggle.checked = s.postProcessingEnabled;
+        postToggle.onchange = () => gameSettings_1.setSetting('postProcessingEnabled', postToggle.checked);
+        const paletteSelect = document.createElement('select');
+        ['None', 'GameBoy', 'CRT', 'Retro16'].forEach((label, i) => {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.text = label;
+            paletteSelect.appendChild(opt);
+        });
+        paletteSelect.value = String(s.paletteMode);
+        paletteSelect.onchange = () => gameSettings_1.setSetting('paletteMode', parseInt(paletteSelect.value, 10));
+        // Asset overrides moved to dedicated Assets page; keep settings panel minimal
+        const row = document.createElement('div');
+        row.className = 'row g-2';
+        const col = (child, label) => {
+            const c = document.createElement('div');
+            c.className = 'col-auto d-flex align-items-center gap-2';
+            const l = document.createElement('span');
+            l.className = 'text-secondary small';
+            l.textContent = label;
+            c.appendChild(l);
+            c.appendChild(child);
+            return c;
+        };
+        row.appendChild(col(lightInput, 'Player Light'));
+        row.appendChild(col(postToggle, 'Post FX'));
+        row.appendChild(col(paletteSelect, 'Palette'));
+        // Overrides available on the Assets page
+        el.appendChild(row);
+        return component;
+    }
+    exports_14("createSettingsPanel", createSettingsPanel);
+    return {
+        setters: [
+            function (gameSettings_1_1) {
+                gameSettings_1 = gameSettings_1_1;
+            }
+        ],
+        execute: function () {
+        }
+    };
+});
+System.register("getImageData", [], function (exports_15, context_15) {
+    "use strict";
+    var __moduleName = context_15 && context_15.id;
     function getImageData(url) {
         const img = document.createElement("img");
         img.src = url;
@@ -851,25 +951,25 @@ System.register("getImageData", [], function (exports_13, context_13) {
             });
         });
     }
-    exports_13("default", getImageData);
+    exports_15("default", getImageData);
     return {
         setters: [],
         execute: function () {
         }
     };
 });
-System.register("presets", [], function (exports_14, context_14) {
+System.register("presets", [], function (exports_16, context_16) {
     "use strict";
     var presetDefaults, presets;
-    var __moduleName = context_14 && context_14.id;
+    var __moduleName = context_16 && context_16.id;
     function getPresetPath(name) {
         return `images/${name}.png`;
     }
-    exports_14("getPresetPath", getPresetPath);
+    exports_16("getPresetPath", getPresetPath);
     return {
         setters: [],
         execute: function () {
-            exports_14("presetDefaults", presetDefaults = {
+            exports_16("presetDefaults", presetDefaults = {
                 name: "",
                 N: 3,
                 symmetry: 8,
@@ -879,7 +979,7 @@ System.register("presets", [], function (exports_14, context_14) {
                 outputWidth: 48,
                 outputHeight: 48,
             });
-            exports_14("presets", presets = [
+            exports_16("presets", presets = [
                 { name: "3Bricks", symmetry: 1 },
                 { name: "Angular" },
                 { name: "Cat", symmetry: 2, outputWidth: 80, outputHeight: 80 },
@@ -932,13 +1032,13 @@ System.register("presets", [], function (exports_14, context_14) {
         }
     };
 });
-System.register("components/presetPicker", ["getImageData", "util", "components/inputs", "components/common", "presets"], function (exports_15, context_15) {
+System.register("components/presetPicker", ["getImageData", "util", "components/inputs", "components/common", "presets"], function (exports_17, context_17) {
     "use strict";
     var getImageData_1, util_3, inputs_2, common_2, presets_1;
-    var __moduleName = context_15 && context_15.id;
+    var __moduleName = context_17 && context_17.id;
     function createPresetPicker() {
         const presetPicker = {
-            domElement: Object.assign(document.createElement("div"), { className: "presetPickerComponent" }),
+            domElement: Object.assign(document.createElement("div"), { className: "presetPickerComponent card" }),
         };
         const onPick = (image, options) => {
             if (presetPicker.onPick) {
@@ -989,7 +1089,7 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
         ]);
         return presetPicker;
     }
-    exports_15("createPresetPicker", createPresetPicker);
+    exports_17("createPresetPicker", createPresetPicker);
     return {
         setters: [
             function (getImageData_1_1) {
@@ -1012,10 +1112,10 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
         }
     };
 });
-System.register("colorMapping", [], function (exports_16, context_16) {
+System.register("colorMapping", [], function (exports_18, context_18) {
     "use strict";
     var GameElement, DEFAULT_COLOR_MAPPINGS;
-    var __moduleName = context_16 && context_16.id;
+    var __moduleName = context_18 && context_18.id;
     function hexToRgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         return result ? {
@@ -1024,17 +1124,17 @@ System.register("colorMapping", [], function (exports_16, context_16) {
             b: parseInt(result[3], 16)
         } : null;
     }
-    exports_16("hexToRgb", hexToRgb);
+    exports_18("hexToRgb", hexToRgb);
     function rgbToHex(r, g, b) {
         return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
     }
-    exports_16("rgbToHex", rgbToHex);
+    exports_18("rgbToHex", rgbToHex);
     function colorDistance(color1, color2) {
         return Math.sqrt(Math.pow(color1.r - color2.r, 2) +
             Math.pow(color1.g - color2.g, 2) +
             Math.pow(color1.b - color2.b, 2));
     }
-    exports_16("colorDistance", colorDistance);
+    exports_18("colorDistance", colorDistance);
     // Find the closest matching color from the mapping
     function findClosestColor(r, g, b, mappings) {
         const targetColor = { r, g, b };
@@ -1052,7 +1152,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         }
         return closestElement;
     }
-    exports_16("findClosestColor", findClosestColor);
+    exports_18("findClosestColor", findClosestColor);
     // Convert image data to game map
     function imageDataToGameMap(imageData, mappings = DEFAULT_COLOR_MAPPINGS) {
         const { data, width, height } = imageData;
@@ -1071,7 +1171,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         }
         return gameMap;
     }
-    exports_16("imageDataToGameMap", imageDataToGameMap);
+    exports_18("imageDataToGameMap", imageDataToGameMap);
     // Find player start position
     function findPlayerStart(gameMap) {
         for (let y = 0; y < gameMap.length; y++) {
@@ -1083,7 +1183,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         }
         return null;
     }
-    exports_16("findPlayerStart", findPlayerStart);
+    exports_18("findPlayerStart", findPlayerStart);
     // Find player finish position
     function findPlayerFinish(gameMap) {
         for (let y = 0; y < gameMap.length; y++) {
@@ -1095,7 +1195,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         }
         return null;
     }
-    exports_16("findPlayerFinish", findPlayerFinish);
+    exports_18("findPlayerFinish", findPlayerFinish);
     // Get all enemy positions
     function findEnemies(gameMap) {
         const enemies = [];
@@ -1108,7 +1208,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         }
         return enemies;
     }
-    exports_16("findEnemies", findEnemies);
+    exports_18("findEnemies", findEnemies);
     // Check if a position is walkable (not a wall)
     function isWalkable(gameMap, x, y) {
         if (y < 0 || y >= gameMap.length || x < 0 || x >= gameMap[y].length) {
@@ -1117,7 +1217,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         const element = gameMap[y][x];
         return element !== GameElement.WALL && element !== GameElement.DOOR;
     }
-    exports_16("isWalkable", isWalkable);
+    exports_18("isWalkable", isWalkable);
     function getElementProperties(element) {
         switch (element) {
             case GameElement.WALL:
@@ -1227,7 +1327,7 @@ System.register("colorMapping", [], function (exports_16, context_16) {
                 };
         }
     }
-    exports_16("getElementProperties", getElementProperties);
+    exports_18("getElementProperties", getElementProperties);
     return {
         setters: [],
         execute: function () {
@@ -1246,9 +1346,9 @@ System.register("colorMapping", [], function (exports_16, context_16) {
                 GameElement["KEY"] = "key";
                 GameElement["DOOR"] = "door";
                 GameElement["STAIRS"] = "stairs";
-            })(GameElement || (exports_16("GameElement", GameElement = {})));
+            })(GameElement || (exports_18("GameElement", GameElement = {})));
             // Default color mappings based on user requirements
-            exports_16("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
+            exports_18("DEFAULT_COLOR_MAPPINGS", DEFAULT_COLOR_MAPPINGS = {
                 '#000000': GameElement.WALL, // Black - wall
                 '#FF0000': GameElement.DANGER, // Red - danger
                 '#0000FF': GameElement.WATER, // Blue - water
@@ -1267,10 +1367,10 @@ System.register("colorMapping", [], function (exports_16, context_16) {
         }
     };
 });
-System.register("components/drawingCanvas", ["util", "components/common", "colorMapping"], function (exports_17, context_17) {
+System.register("components/drawingCanvas", ["util", "components/common", "colorMapping"], function (exports_19, context_19) {
     "use strict";
     var util_4, common_3, colorMapping_1;
-    var __moduleName = context_17 && context_17.id;
+    var __moduleName = context_19 && context_19.id;
     function createDrawingCanvas() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "drawingCanvasComponent" }),
@@ -1740,7 +1840,7 @@ System.register("components/drawingCanvas", ["util", "components/common", "color
         ]);
         return component;
     }
-    exports_17("createDrawingCanvas", createDrawingCanvas);
+    exports_19("createDrawingCanvas", createDrawingCanvas);
     return {
         setters: [
             function (util_4_1) {
@@ -1757,10 +1857,10 @@ System.register("components/drawingCanvas", ["util", "components/common", "color
         }
     };
 });
-System.register("components/colorReference", ["colorMapping"], function (exports_18, context_18) {
+System.register("components/colorReference", ["colorMapping"], function (exports_20, context_20) {
     "use strict";
     var colorMapping_2;
-    var __moduleName = context_18 && context_18.id;
+    var __moduleName = context_20 && context_20.id;
     function createColorReference() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "colorReferenceComponent" }),
@@ -1861,7 +1961,7 @@ System.register("components/colorReference", ["colorMapping"], function (exports
         component.updateMappings();
         return component;
     }
-    exports_18("createColorReference", createColorReference);
+    exports_20("createColorReference", createColorReference);
     return {
         setters: [
             function (colorMapping_2_1) {
@@ -1872,10 +1972,10 @@ System.register("components/colorReference", ["colorMapping"], function (exports
         }
     };
 });
-System.register("components/imageEditor", ["util", "components/common", "components/colorReference"], function (exports_19, context_19) {
+System.register("components/imageEditor", ["util", "components/common", "components/colorReference"], function (exports_21, context_21) {
     "use strict";
     var util_5, common_4, colorReference_1;
-    var __moduleName = context_19 && context_19.id;
+    var __moduleName = context_21 && context_21.id;
     function createImageEditor() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "imageEditorComponent" }),
@@ -2200,7 +2300,7 @@ System.register("components/imageEditor", ["util", "components/common", "compone
         component.domElement.appendChild(mainContainer);
         return component;
     }
-    exports_19("createImageEditor", createImageEditor);
+    exports_21("createImageEditor", createImageEditor);
     return {
         setters: [
             function (util_5_1) {
@@ -2217,10 +2317,10 @@ System.register("components/imageEditor", ["util", "components/common", "compone
         }
     };
 });
-System.register("components/terrain", ["colorMapping"], function (exports_20, context_20) {
+System.register("components/terrain", ["colorMapping"], function (exports_22, context_22) {
     "use strict";
     var colorMapping_3;
-    var __moduleName = context_20 && context_20.id;
+    var __moduleName = context_22 && context_22.id;
     // Build a per-tile height map from the color-based game map.
     // Units are in world meters; positive raises ground, negative lowers.
     function buildHeightMap(gameMap) {
@@ -2291,7 +2391,7 @@ System.register("components/terrain", ["colorMapping"], function (exports_20, co
         }
         return out;
     }
-    exports_20("buildHeightMap", buildHeightMap);
+    exports_22("buildHeightMap", buildHeightMap);
     // Bilinear interpolation of ground height at fractional position
     function sampleHeightBilinear(heights, x, y) {
         const cols = heights[0].length;
@@ -2310,7 +2410,7 @@ System.register("components/terrain", ["colorMapping"], function (exports_20, co
         const hx1 = h01 * (1 - tx) + h11 * tx;
         return hx0 * (1 - ty) + hx1 * ty;
     }
-    exports_20("sampleHeightBilinear", sampleHeightBilinear);
+    exports_22("sampleHeightBilinear", sampleHeightBilinear);
     // Basic 2D value-noise blended to mimic simplex; deterministic per seed
     function createSimplexLikeNoise(seed) {
         const rand = mulberry32(seed);
@@ -2369,7 +2469,58 @@ System.register("components/terrain", ["colorMapping"], function (exports_20, co
         }
         return false;
     }
-    exports_20("isWaterEdge", isWaterEdge);
+    exports_22("isWaterEdge", isWaterEdge);
+    // Build per-tile ceiling height map. Returns absolute world Y values for the ceiling surface.
+    function buildCeilingMap(gameMap, floorHeights) {
+        const rows = gameMap.length;
+        const cols = gameMap[0].length;
+        const ceilings = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        // Use noise for gentle vaulting; widen over water, tighten over danger
+        const noise = createSimplexLikeNoise(4242);
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                const nx = x / Math.max(1, cols);
+                const ny = y / Math.max(1, rows);
+                const base = 2.3; // base clearance in meters
+                const n = noise(nx * 1.5, ny * 1.5) * 0.5; // -0.5..0.5
+                let extra = 0.0;
+                const el = gameMap[y][x];
+                if (el === colorMapping_3.GameElement.WATER)
+                    extra += 0.4; // taller cavern over water
+                if (el === colorMapping_3.GameElement.DANGER || el === colorMapping_3.GameElement.FIRE)
+                    extra -= 0.2; // tighter, oppressive feel
+                const minGap = 1.8;
+                const maxGap = 3.3;
+                const desiredGap = clamp(base + n + extra, minGap, maxGap);
+                ceilings[y][x] = floorHeights[y][x] + desiredGap;
+            }
+        }
+        // Soft blur to avoid harsh steps
+        const out = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                let sum = 0;
+                let count = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const nx = x + dx, ny = y + dy;
+                        if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
+                            sum += ceilings[ny][nx];
+                            count++;
+                        }
+                    }
+                }
+                out[y][x] = sum / Math.max(1, count);
+            }
+        }
+        return out;
+    }
+    exports_22("buildCeilingMap", buildCeilingMap);
+    function sampleCeilingBilinear(ceilings, x, y) {
+        return sampleHeightBilinear(ceilings, x, y);
+    }
+    exports_22("sampleCeilingBilinear", sampleCeilingBilinear);
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
     return {
         setters: [
             function (colorMapping_3_1) {
@@ -2382,9 +2533,9 @@ System.register("components/terrain", ["colorMapping"], function (exports_20, co
 });
 // Simple procedural icon generator for element sprites
 // Produces 32x32 PNG data URLs with minimalist symbols and colors
-System.register("components/proceduralSprites", [], function (exports_21, context_21) {
+System.register("components/proceduralSprites", [], function (exports_23, context_23) {
     "use strict";
-    var __moduleName = context_21 && context_21.id;
+    var __moduleName = context_23 && context_23.id;
     function generateProceduralSprite(kind, size = 32) {
         const canvas = document.createElement('canvas');
         canvas.width = size;
@@ -2578,17 +2729,17 @@ System.register("components/proceduralSprites", [], function (exports_21, contex
         }
         return canvas.toDataURL('image/png');
     }
-    exports_21("generateProceduralSprite", generateProceduralSprite);
+    exports_23("generateProceduralSprite", generateProceduralSprite);
     return {
         setters: [],
         execute: function () {
         }
     };
 });
-System.register("components/threeJSDungeonCrawler", ["colorMapping", "components/terrain", "components/proceduralSprites"], function (exports_22, context_22) {
+System.register("components/threeJSDungeonCrawler", ["colorMapping", "components/terrain", "gameSettings", "components/proceduralSprites"], function (exports_24, context_24) {
     "use strict";
-    var colorMapping_4, terrain_1, proceduralSprites_1;
-    var __moduleName = context_22 && context_22.id;
+    var colorMapping_4, terrain_1, gameSettings_2, proceduralSprites_1;
+    var __moduleName = context_24 && context_24.id;
     function createThreeJSDungeonCrawler() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "threeJSDungeonCrawlerComponent" }),
@@ -2621,6 +2772,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         let hudMinimapSprite; // THREE.Sprite
         // Fancy environment visuals
         let waterMaterials = []; // THREE.ShaderMaterial[]
+        let foamMeshes = [];
         let grassSwaySprites = []; // THREE.Sprite[] with sway data
         let glintSprites = []; // collectible shimmer sprites
         let animationId;
@@ -2636,6 +2788,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         // Game state
         let currentGameMap = [];
         let heightMap = [];
+        let ceilingMap = [];
         let enemies = [];
         let gameRunning = false;
         // Player state
@@ -2656,6 +2809,11 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         const WALL_HEIGHT = 2.0;
         const MOVE_SPEED = 0.05;
         const ROTATE_SPEED = 0.03;
+        // Vertical movement
+        let playerVerticalVel = 0;
+        const GRAVITY = -9.81 * 0.02; // tuned for frame scale
+        const JUMP_VELOCITY = 0.22;
+        const STEP_MAX = 0.28; // maximum step height
         const PLAYER_COLLISION_RADIUS = 0.18; // Reduced for smoother movement in tight corridors
         // Input state
         const keysPressed = new Set();
@@ -2709,6 +2867,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             await setupThreeJS();
             // Create the dungeon geometry
             heightMap = terrain_1.buildHeightMap(currentGameMap);
+            ceilingMap = terrain_1.buildCeilingMap(currentGameMap, heightMap);
             createDungeon();
             // In case the spawn is blocked, relocate to nearest walkable tile
             ensureSpawnAccessible();
@@ -3020,7 +3179,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             const ambient = new THREE.AmbientLight(0xffffff, 0.35);
             scene.add(ambient);
             // Player torch light (follows player)
-            const playerTorch = new THREE.PointLight(0xffc866, 5.0, 16);
+            const s = gameSettings_2.getSettings();
+            const playerTorch = new THREE.PointLight(0xffc866, s.playerLightIntensity, 16);
             playerTorch.position.set(player.x, 1.5, player.y);
             playerTorch.castShadow = true;
             // Enhanced shadow settings
@@ -3034,6 +3194,12 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             scene.playerTorch = playerTorch;
             // Softer, farther fog so the scene is not too dark
             scene.fog = new THREE.Fog(0x202030, 8, 20);
+            // React to runtime settings changes (light intensity and post)
+            gameSettings_2.onSettingsChange((key) => {
+                if (key === 'playerLightIntensity') {
+                    scene.playerTorch.intensity = gameSettings_2.getSettings().playerLightIntensity;
+                }
+            });
         }
         function createDungeon() {
             const mapWidth = currentGameMap[0].length;
@@ -3100,8 +3266,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             createCeiling(width, height);
         }
         function createCeiling(width, height) {
-            // Create ceiling geometry
-            const ceilingGeometry = new THREE.PlaneGeometry(width, height);
+            // Create ceiling geometry with per-vertex heights from ceilingMap
+            const ceilingGeometry = new THREE.PlaneGeometry(width, height, width, height);
             // Load ceiling texture
             const ceilingTexture = textureLoader.load('textures/ceiling_stone.png');
             ceilingTexture.wrapS = THREE.RepeatWrapping;
@@ -3123,9 +3289,21 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 emissive: new THREE.Color(0x0e0e12),
                 emissiveIntensity: 0.06
             });
+            // Height displacements: encode gap by moving vertices down locally
+            const pos = ceilingGeometry.attributes.position;
+            for (let y = 0; y <= height; y++) {
+                for (let x = 0; x <= width; x++) {
+                    const idx = (y * (width + 1) + x) * 3;
+                    const gx = x - 0.5;
+                    const gy = y - 0.5;
+                    const cH = terrain_1.sampleCeilingBilinear(ceilingMap, gx, gy);
+                    pos.array[idx + 2] = cH; // will rotate to face down
+                }
+            }
+            pos.needsUpdate = true;
             const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
             ceiling.rotation.x = Math.PI / 2; // Rotate to face down
-            ceiling.position.set(width / 2 - 0.5, WALL_HEIGHT, height / 2 - 0.5);
+            ceiling.position.set(width / 2 - 0.5, 0, height / 2 - 0.5);
             ceiling.receiveShadow = true;
             ceiling.frustumCulled = false; // ensure ceiling remains visible
             scene.add(ceiling);
@@ -3383,6 +3561,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     foam.position.set(x, groundH + 0.035, y);
                     foam.renderOrder = 3;
                     scene.add(foam);
+                    foamMeshes.push(foam);
                 }
             }
         }
@@ -3577,6 +3756,13 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 const phase = s.swayPhase || 0;
                 s.rotation.z = Math.sin(time * 2.0 + phase) * 0.08;
             });
+            // Animate foam opacity
+            foamMeshes.forEach((m, idx) => {
+                const mat = m.material;
+                if (mat && mat.opacity !== undefined) {
+                    mat.opacity = 0.45 + Math.sin(time * 2.5 + idx) * 0.1;
+                }
+            });
             // Remove expired splash systems
             transientSplashSystems = transientSplashSystems.filter((sys) => {
                 sys.userData.life -= 0.016;
@@ -3687,6 +3873,14 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 player.angle += mouseX * 0.002;
                 mouseX = 0; // Reset mouse movement
             }
+            // Jump input
+            if (keysPressed.has('space')) {
+                // Only allow jump if near ground level (not already in air)
+                if (Math.abs(playerVerticalVel) < 0.001) {
+                    playerVerticalVel = JUMP_VELOCITY;
+                }
+                keysPressed.delete('space');
+            }
             // Water slow and swimming bobbing
             const tileX = Math.floor(newX);
             const tileY = Math.floor(newY);
@@ -3707,10 +3901,26 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 trySlideAlongWalls(newX, newY);
             }
             // Update camera position with swim bob and terrain height
+            // Vertical physics
+            let baseEye = 1 + groundH; // baseline eye height following terrain
+            if (inWater) {
+                // Buoyancy counteracts gravity
+                const buoyancyForce = Math.min(0.015, waterDepth * 0.02);
+                playerVerticalVel += buoyancyForce;
+                playerVerticalVel *= 0.96; // water drag
+            }
+            else {
+                playerVerticalVel += GRAVITY;
+            }
+            // Simulate vertical position of the camera relative to baseEye
+            baseEye += playerVerticalVel;
+            // Prevent sinking below terrain more than STEP_MAX unless in water
+            if (!inWater && baseEye < 1 + groundH - STEP_MAX) {
+                baseEye = 1 + groundH - STEP_MAX;
+                playerVerticalVel = 0;
+            }
             const swimBob = inWater ? (Math.sin(Date.now() * 0.006) * 0.08) : 0;
-            const baseEye = 1 + groundH; // eye follows local terrain
-            const buoyancy = inWater ? Math.min(0.5, waterDepth * 0.6) : 0;
-            camera.position.set(player.x, baseEye - buoyancy + swimBob, player.y);
+            camera.position.set(player.x, baseEye + swimBob, player.y);
             const lookX = player.x + Math.cos(player.angle) * 2;
             const lookZ = player.y + Math.sin(player.angle) * 2;
             camera.lookAt(lookX, 1, lookZ);
@@ -3891,6 +4101,31 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             }
             return true;
         }
+        // Exposed hook to trigger enemy hit sparks (call externally when an enemy is damaged)
+        window.spawnHitSparks = function (worldX, worldY) {
+            const count = 16;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const r = Math.random() * 0.25;
+                positions[i * 3] = worldX + Math.cos(a) * r;
+                positions[i * 3 + 1] = 1.0 + Math.random() * 0.2;
+                positions[i * 3 + 2] = worldY + Math.sin(a) * r;
+                colors[i * 3] = 1.0;
+                colors[i * 3 + 1] = 0.8;
+                colors[i * 3 + 2] = 0.2;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const material = new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+            const points = new THREE.Points(geometry, material);
+            points.life = 0.35;
+            scene.add(points);
+            // Let update loop fade it out
+            transientSplashSystems.push(points);
+        };
         function trySlideAlongWalls(targetX, targetY) {
             const currentX = player.x;
             const currentY = player.y;
@@ -4361,6 +4596,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 case 'e':
                     keysPressed.add('keye');
                     break;
+                case ' ':
+                    keysPressed.add('space');
+                    break;
             }
         }
         function handleKeyUp(e) {
@@ -4396,6 +4634,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     break;
                 case 'e':
                     keysPressed.delete('keye');
+                    break;
+                case ' ':
+                    keysPressed.delete('space');
                     break;
             }
         }
@@ -4434,7 +4675,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         }
         return component;
     }
-    exports_22("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
+    exports_24("createThreeJSDungeonCrawler", createThreeJSDungeonCrawler);
     return {
         setters: [
             function (colorMapping_4_1) {
@@ -4442,6 +4683,9 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             },
             function (terrain_1_1) {
                 terrain_1 = terrain_1_1;
+            },
+            function (gameSettings_2_1) {
+                gameSettings_2 = gameSettings_2_1;
             },
             function (proceduralSprites_1_1) {
                 proceduralSprites_1 = proceduralSprites_1_1;
@@ -4451,10 +4695,10 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         }
     };
 });
-System.register("components/imageUploader", ["getImageData", "util", "components/common"], function (exports_23, context_23) {
+System.register("components/imageUploader", ["getImageData", "util", "components/common"], function (exports_25, context_25) {
     "use strict";
     var getImageData_2, util_6, common_5;
-    var __moduleName = context_23 && context_23.id;
+    var __moduleName = context_25 && context_25.id;
     function createImageUploader() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "imageUploaderComponent" }),
@@ -4599,7 +4843,7 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         ]);
         return component;
     }
-    exports_23("createImageUploader", createImageUploader);
+    exports_25("createImageUploader", createImageUploader);
     return {
         setters: [
             function (getImageData_2_1) {
@@ -4616,10 +4860,102 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "colorMapping"], function (exports_24, context_24) {
+System.register("components/assetManager", ["gameSettings"], function (exports_26, context_26) {
     "use strict";
-    var run_1, util_7, wfcOptions_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, colorMapping_5, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
-    var __moduleName = context_24 && context_24.id;
+    var gameSettings_3, SPRITES, TEXTURES;
+    var __moduleName = context_26 && context_26.id;
+    function createAssetManager() {
+        const el = Object.assign(document.createElement('div'), { className: 'assetManager card' });
+        const title = document.createElement('h5');
+        title.textContent = 'Assets';
+        title.className = 'mb-3';
+        el.appendChild(title);
+        const grid = document.createElement('div');
+        grid.className = 'row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3';
+        el.appendChild(grid);
+        function addUploader(name, kind) {
+            const col = document.createElement('div');
+            col.className = 'col';
+            const card = document.createElement('div');
+            card.className = 'p-3 rounded-3 bg-dark border border-secondary';
+            const label = document.createElement('div');
+            label.className = 'text-secondary small mb-2';
+            label.textContent = `${kind.toUpperCase()}: ${name}`;
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.className = 'form-control form-control-sm';
+            input.onchange = () => {
+                const f = input.files && input.files[0];
+                if (!f)
+                    return;
+                const url = URL.createObjectURL(f);
+                if (kind === 'sprite')
+                    gameSettings_3.setSpriteOverride(name, url);
+                else
+                    gameSettings_3.setTextureOverride(name, url);
+                const preview = card.querySelector('img');
+                if (preview)
+                    preview.src = url;
+            };
+            const preview = document.createElement('img');
+            preview.className = 'img-fluid rounded mt-2';
+            preview.style.maxHeight = '80px';
+            card.appendChild(label);
+            card.appendChild(input);
+            card.appendChild(preview);
+            col.appendChild(card);
+            grid.appendChild(col);
+        }
+        SPRITES.forEach(n => addUploader(n, 'sprite'));
+        TEXTURES.forEach(n => addUploader(n, 'texture'));
+        const save = document.createElement('button');
+        save.textContent = 'Save to Browser';
+        save.className = 'btn btn-success mt-3';
+        save.onclick = () => {
+            const s = gameSettings_3.getSettings();
+            const serialized = {
+                sprites: Array.from(s.spriteOverrides.entries()),
+                textures: Array.from(s.textureOverrides.entries())
+            };
+            localStorage.setItem('wfc-assets', JSON.stringify(serialized));
+            save.textContent = 'Saved ✓';
+            setTimeout(() => save.textContent = 'Save to Browser', 1200);
+        };
+        el.appendChild(save);
+        const load = document.createElement('button');
+        load.textContent = 'Load from Browser';
+        load.className = 'btn btn-secondary mt-3 ms-2';
+        load.onclick = () => {
+            const raw = localStorage.getItem('wfc-assets');
+            if (!raw)
+                return;
+            const parsed = JSON.parse(raw);
+            if (parsed.sprites)
+                parsed.sprites.forEach(([k, v]) => gameSettings_3.setSpriteOverride(k, v));
+            if (parsed.textures)
+                parsed.textures.forEach(([k, v]) => gameSettings_3.setTextureOverride(k, v));
+        };
+        el.appendChild(load);
+        return { domElement: el };
+    }
+    exports_26("createAssetManager", createAssetManager);
+    return {
+        setters: [
+            function (gameSettings_3_1) {
+                gameSettings_3 = gameSettings_3_1;
+            }
+        ],
+        execute: function () {
+            SPRITES = ['enemy', 'danger', 'finish', 'treasure', 'key', 'door', 'stairs', 'blade', 'fire', 'water', 'grass'];
+            TEXTURES = ['wall_brick', 'wall_stone', 'floor_stone', 'ceiling_stone', 'water_texture', 'grass_texture', 'danger_texture', 'fire_texture', 'wood_texture', 'metal_texture'];
+        }
+    };
+});
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/settingsPanel", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "components/assetManager", "colorMapping"], function (exports_27, context_27) {
+    "use strict";
+    var run_1, util_7, wfcOptions_1, settingsPanel_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, assetManager_1, colorMapping_5, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, settingsPanel, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
+    var __moduleName = context_27 && context_27.id;
     // Tab switching logic for input tabs
     function switchInputTab(activeTab, inactiveTabs, showElement) {
         // Remove active class from all tabs
@@ -4659,15 +4995,24 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         }
     }
     function buildInputMode() {
+        const assetsBtn = document.createElement('button');
+        assetsBtn.className = 'btn btn-secondary ms-2';
+        assetsBtn.textContent = 'Assets';
+        assetsBtn.onclick = () => {
+            contentContainer.innerHTML = '';
+            contentContainer.appendChild(settingsPanel.domElement);
+            const assets = assetManager_1.createAssetManager();
+            contentContainer.appendChild(assets.domElement);
+        };
         util_7.buildDomTree(contentContainer, [
-            document.createElement("h2"), ["Input bitmap"],
+            settingsPanel.domElement,
             inputTabContainer, [
                 presetTab,
                 drawTab,
                 uploadTab,
+                assetsBtn,
             ],
             inputContainer,
-            document.createElement("h2"), ["Options"],
             wfcOptions.domElement,
         ]);
         // Initialize with preset picker
@@ -4696,9 +5041,11 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         editImageButton.onclick = () => {
             switchMode(AppMode.IMAGE_EDITING);
         };
+        const actions = document.createElement("div");
+        actions.className = "toolbar";
         util_7.buildDomTree(contentContainer, [
-            document.createElement("h2"), ["Wave Function Collapse Generation"],
-            document.createElement("div"), [
+            settingsPanel.domElement,
+            actions, [
                 restartWfc,
                 downloadButton,
                 editImageButton,
@@ -4711,7 +5058,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             imageEditor.loadImage(generatedImageData);
         }
         util_7.buildDomTree(contentContainer, [
-            document.createElement("h2"), ["Edit Generated Image"],
+            settingsPanel.domElement,
             document.createElement("p"), [
                 "Use the drawing tools to add player start (dark green) and finish (dark red) points, polish routes, and adjust the dungeon layout."
             ],
@@ -4720,7 +5067,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
     }
     function buildDungeonCrawlerMode() {
         util_7.buildDomTree(contentContainer, [
-            document.createElement("h2"), ["Dungeon Crawler Game"],
+            settingsPanel.domElement,
             dungeonCrawler.domElement,
         ]);
     }
@@ -4762,6 +5109,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             function (wfcOptions_1_1) {
                 wfcOptions_1 = wfcOptions_1_1;
             },
+            function (settingsPanel_1_1) {
+                settingsPanel_1 = settingsPanel_1_1;
+            },
             function (presetPicker_1_1) {
                 presetPicker_1 = presetPicker_1_1;
             },
@@ -4776,6 +5126,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             },
             function (imageUploader_1_1) {
                 imageUploader_1 = imageUploader_1_1;
+            },
+            function (assetManager_1_1) {
+                assetManager_1 = assetManager_1_1;
             },
             function (colorMapping_5_1) {
                 colorMapping_5 = colorMapping_5_1;
@@ -4838,6 +5191,8 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             gameModeTab.className = "modeTab";
             contentContainer = document.createElement("div");
             contentContainer.className = "contentContainer";
+            // Global settings panel
+            settingsPanel = settingsPanel_1.createSettingsPanel();
             // Input mode content
             inputTabContainer = document.createElement("div");
             inputTabContainer.className = "tabContainer";
@@ -4895,6 +5250,7 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             };
             // Image editor
             imageEditor = imageEditor_1.createImageEditor();
+            imageEditor.domElement.classList.add('card');
             imageEditor.onEditComplete = (image) => {
                 generatedImageData = image;
                 switchMode(AppMode.DUNGEON_CRAWLER);
@@ -4922,7 +5278,6 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             mainElem = document.querySelector("main");
             if (mainElem) {
                 util_7.buildDomTree(mainElem, [
-                    document.createElement("h2"), ["Wave Function Collapse Dungeon Generator"],
                     modeTabContainer, [
                         inputModeTab,
                         wfcModeTab,

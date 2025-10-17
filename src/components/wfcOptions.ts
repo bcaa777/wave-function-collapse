@@ -11,7 +11,7 @@ export interface IComponentWfcOptions extends IComponent {
 
 export function createWfcOptions(): IComponentWfcOptions {
   const domElement = document.createElement("div");
-  domElement.className = "wfcInputComponent";
+  domElement.className = "wfcInputComponent card";
 
   const components: { [P in keyof IWfcOptions]: IComponentInput<IWfcOptions[P]> } = {
     N: createRadioInput("Pattern size", [
@@ -47,8 +47,7 @@ export function createWfcOptions(): IComponentWfcOptions {
 
   const wfcOptions = {
     domElement: buildDomTree(domElement, [
-      document.createElement("fieldset"), [
-        document.createElement("legend"), ["Input Bitmap"],
+      document.createElement("div"), [
         inputGroup(), [
           components.periodicInput.domElement,
         ],
@@ -62,8 +61,7 @@ export function createWfcOptions(): IComponentWfcOptions {
           components.ground.domElement,
         ],
       ],
-      document.createElement("fieldset"), [
-        document.createElement("legend"), ["Output Bitmap"],
+      document.createElement("div"), [
         inputGroup(), [
           components.periodicOutput.domElement,
         ],

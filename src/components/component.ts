@@ -1,3 +1,3 @@
 export interface IComponent {
-  domElement: Node;
+  domElement: HTMLElement;
 }

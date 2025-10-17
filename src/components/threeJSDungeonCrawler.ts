@@ -1,7 +1,8 @@
 import { buildDomTree } from "../util";
 import { IComponent } from "./component";
 import { GameElement, getElementProperties } from "../colorMapping";
-import { buildHeightMap, sampleHeightBilinear, isWaterEdge } from './terrain';
+import { buildHeightMap, sampleHeightBilinear, isWaterEdge, buildCeilingMap, sampleCeilingBilinear } from './terrain';
+import { getSettings, onSettingsChange } from '../gameSettings';
 import { generateProceduralSprite } from './proceduralSprites';
 
 // Use global THREE object loaded from CDN
@@ -73,6 +74,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   let hudMinimapSprite: any;  // THREE.Sprite
   // Fancy environment visuals
   let waterMaterials: any[] = []; // THREE.ShaderMaterial[]
+  let foamMeshes: any[] = [];
   let grassSwaySprites: any[] = []; // THREE.Sprite[] with sway data
   let glintSprites: any[] = []; // collectible shimmer sprites
   let animationId: number;
@@ -90,6 +92,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   // Game state
   let currentGameMap: GameElement[][] = [];
   let heightMap: number[][] = [];
+  let ceilingMap: number[][] = [];
   let enemies: Enemy[] = [];
   let gameRunning = false;
 
@@ -112,6 +115,11 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   const WALL_HEIGHT = 2.0;
   const MOVE_SPEED = 0.05;
   const ROTATE_SPEED = 0.03;
+  // Vertical movement
+  let playerVerticalVel = 0;
+  const GRAVITY = -9.81 * 0.02; // tuned for frame scale
+  const JUMP_VELOCITY = 0.22;
+  const STEP_MAX = 0.28; // maximum step height
   const PLAYER_COLLISION_RADIUS = 0.18; // Reduced for smoother movement in tight corridors
 
   // Input state
@@ -175,6 +183,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     // Create the dungeon geometry
     heightMap = buildHeightMap(currentGameMap);
+    ceilingMap = buildCeilingMap(currentGameMap, heightMap);
     createDungeon();
 
     // In case the spawn is blocked, relocate to nearest walkable tile
@@ -503,7 +512,8 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     scene.add(ambient);
 
     // Player torch light (follows player)
-    const playerTorch = new THREE.PointLight(0xffc866, 5.0, 16);
+    const s = getSettings();
+    const playerTorch = new THREE.PointLight(0xffc866, s.playerLightIntensity, 16);
     playerTorch.position.set(player.x, 1.5, player.y);
     playerTorch.castShadow = true;
 
@@ -521,6 +531,13 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     // Softer, farther fog so the scene is not too dark
     scene.fog = new THREE.Fog(0x202030, 8, 20);
+
+    // React to runtime settings changes (light intensity and post)
+    onSettingsChange((key) => {
+      if (key === 'playerLightIntensity') {
+        (scene as any).playerTorch.intensity = getSettings().playerLightIntensity;
+      }
+    });
   }
 
   function createDungeon(): void {
@@ -600,8 +617,8 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
   }
 
   function createCeiling(width: number, height: number): void {
-    // Create ceiling geometry
-    const ceilingGeometry = new THREE.PlaneGeometry(width, height);
+    // Create ceiling geometry with per-vertex heights from ceilingMap
+    const ceilingGeometry = new THREE.PlaneGeometry(width, height, width, height);
 
     // Load ceiling texture
     const ceilingTexture = textureLoader.load('textures/ceiling_stone.png');
@@ -625,9 +642,22 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       emissiveIntensity: 0.06
     });
 
+    // Height displacements: encode gap by moving vertices down locally
+    const pos = ceilingGeometry.attributes.position;
+    for (let y = 0; y <= height; y++) {
+      for (let x = 0; x <= width; x++) {
+        const idx = (y * (width + 1) + x) * 3;
+        const gx = x - 0.5;
+        const gy = y - 0.5;
+        const cH = sampleCeilingBilinear(ceilingMap, gx, gy);
+        pos.array[idx + 2] = cH; // will rotate to face down
+      }
+    }
+    pos.needsUpdate = true;
+
     const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
     ceiling.rotation.x = Math.PI / 2; // Rotate to face down
-    ceiling.position.set(width / 2 - 0.5, WALL_HEIGHT, height / 2 - 0.5);
+    ceiling.position.set(width / 2 - 0.5, 0, height / 2 - 0.5);
     ceiling.receiveShadow = true;
     ceiling.frustumCulled = false; // ensure ceiling remains visible
     scene.add(ceiling);
@@ -897,6 +927,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
         foam.position.set(x, groundH + 0.035, y);
         foam.renderOrder = 3;
         scene.add(foam);
+        foamMeshes.push(foam);
       }
     }
   }
@@ -1120,6 +1151,14 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       s.rotation.z = Math.sin(time * 2.0 + phase) * 0.08;
     });
 
+    // Animate foam opacity
+    foamMeshes.forEach((m: any, idx: number) => {
+      const mat = m.material as any;
+      if (mat && mat.opacity !== undefined) {
+        mat.opacity = 0.45 + Math.sin(time * 2.5 + idx) * 0.1;
+      }
+    });
+
     // Remove expired splash systems
     transientSplashSystems = transientSplashSystems.filter((sys: any) => {
       sys.userData.life -= 0.016;
@@ -1237,6 +1276,15 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       mouseX = 0; // Reset mouse movement
     }
 
+    // Jump input
+    if (keysPressed.has('space')) {
+      // Only allow jump if near ground level (not already in air)
+      if (Math.abs(playerVerticalVel) < 0.001) {
+        playerVerticalVel = JUMP_VELOCITY;
+      }
+      keysPressed.delete('space');
+    }
+
     // Water slow and swimming bobbing
     const tileX = Math.floor(newX);
     const tileY = Math.floor(newY);
@@ -1258,10 +1306,26 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
     }
 
     // Update camera position with swim bob and terrain height
+    // Vertical physics
+    let baseEye = 1 + groundH; // baseline eye height following terrain
+    if (inWater) {
+      // Buoyancy counteracts gravity
+      const buoyancyForce = Math.min(0.015, waterDepth * 0.02);
+      playerVerticalVel += buoyancyForce;
+      playerVerticalVel *= 0.96; // water drag
+    } else {
+      playerVerticalVel += GRAVITY;
+    }
+
+    // Simulate vertical position of the camera relative to baseEye
+    baseEye += playerVerticalVel;
+    // Prevent sinking below terrain more than STEP_MAX unless in water
+    if (!inWater && baseEye < 1 + groundH - STEP_MAX) {
+      baseEye = 1 + groundH - STEP_MAX;
+      playerVerticalVel = 0;
+    }
     const swimBob = inWater ? (Math.sin(Date.now() * 0.006) * 0.08) : 0;
-    const baseEye = 1 + groundH; // eye follows local terrain
-    const buoyancy = inWater ? Math.min(0.5, waterDepth * 0.6) : 0;
-    camera.position.set(player.x, baseEye - buoyancy + swimBob, player.y);
+    camera.position.set(player.x, baseEye + swimBob, player.y);
     const lookX = player.x + Math.cos(player.angle) * 2;
     const lookZ = player.y + Math.sin(player.angle) * 2;
     camera.lookAt(lookX, 1, lookZ);
@@ -1457,6 +1521,30 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
 
     return true;
   }
+
+  // Exposed hook to trigger enemy hit sparks (call externally when an enemy is damaged)
+  (window as any).spawnHitSparks = function(worldX: number, worldY: number) {
+    const count = 16;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.25;
+      positions[i*3] = worldX + Math.cos(a) * r;
+      positions[i*3+1] = 1.0 + Math.random() * 0.2;
+      positions[i*3+2] = worldY + Math.sin(a) * r;
+      colors[i*3] = 1.0; colors[i*3+1] = 0.8; colors[i*3+2] = 0.2;
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+    const points = new THREE.Points(geometry, material);
+    (points as any).life = 0.35;
+    scene.add(points);
+    // Let update loop fade it out
+    transientSplashSystems.push(points);
+  };
 
   function trySlideAlongWalls(targetX: number, targetY: number): void {
     const currentX = player.x;
@@ -1947,6 +2035,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       case 'arrowright': keysPressed.add('arrowright'); break;
       case 'q': keysPressed.add('keyq'); break;
       case 'e': keysPressed.add('keye'); break;
+      case ' ': keysPressed.add('space'); break;
     }
   }
 
@@ -1964,6 +2053,7 @@ export function createThreeJSDungeonCrawler(): IComponentThreeJSDungeonCrawler {
       case 'arrowright': keysPressed.delete('arrowright'); break;
       case 'q': keysPressed.delete('keyq'); break;
       case 'e': keysPressed.delete('keye'); break;
+      case ' ': keysPressed.delete('space'); break;
     }
   }
 
