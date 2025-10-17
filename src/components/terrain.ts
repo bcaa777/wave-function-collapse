@@ -3,64 +3,11 @@ import { GameElement } from "../colorMapping";
 // Build a per-tile height map from the color-based game map.
 // Units are in world meters; positive raises ground, negative lowers.
 export function buildHeightMap(gameMap: GameElement[][]): number[][] {
+  // Default fallback heightmap when none is provided by the caller.
+  // Do NOT derive height from tile types; return a flat zero map matching the grid size.
   const rows = gameMap.length;
   const cols = gameMap[0].length;
-  const heights: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-
-  // Base assignment from element types
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const el = gameMap[y][x];
-      let h = 0;
-      switch (el) {
-        case GameElement.WATER: h = -0.35; break; // water basins
-        case GameElement.GRASS: h = 0.0; break; // base, will add noise later
-        case GameElement.DANGER: h = -0.05; break;
-        case GameElement.FIRE: h = 0.0; break;
-        default: h = 0.0; break;
-      }
-      heights[y][x] = h;
-    }
-  }
-
-  // Add gentle noise hills constrained by walls (keep walls flat)
-  const noise = createSimplexLikeNoise(1337);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      if (gameMap[y][x] === GameElement.WALL) continue;
-      const nx = x / Math.max(1, cols);
-      const ny = y / Math.max(1, rows);
-      const n = noise(nx * 2.0, ny * 2.0) * 0.12; // amplitude
-      heights[y][x] += n;
-    }
-  }
-
-  // Simple smoothing pass to soften steps (excluding walls)
-  const out: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      let sum = 0; let count = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy;
-          if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
-            sum += heights[ny][nx];
-            count++;
-          }
-        }
-      }
-      out[y][x] = sum / Math.max(1, count);
-    }
-  }
-
-  // Keep walls at 0 height for clean vertical faces
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      if (gameMap[y][x] === GameElement.WALL) out[y][x] = 0;
-    }
-  }
-
-  return out;
+  return Array.from({ length: rows }, () => new Array(cols).fill(0));
 }
 
 // Bilinear interpolation of ground height at fractional position
@@ -151,15 +98,10 @@ export function buildCeilingMap(gameMap: GameElement[][], floorHeights: number[]
       const nx = x / Math.max(1, cols);
       const ny = y / Math.max(1, rows);
       const base = 2.3; // base clearance in meters
-      const n = noise(nx * 1.5, ny * 1.5) * 0.5; // -0.5..0.5
-      let extra = 0.0;
-      const el = gameMap[y][x];
-      if (el === GameElement.WATER) extra += 0.4; // taller cavern over water
-      if (el === GameElement.DANGER || el === GameElement.FIRE) extra -= 0.2; // tighter, oppressive feel
-
-      const minGap = 1.8;
-      const maxGap = 3.3;
-      const desiredGap = clamp(base + n + extra, minGap, maxGap);
+      const n = noise(nx * 1.2, ny * 1.2) * 0.35; // -0.35..0.35
+      const minGap = 1.9;
+      const maxGap = 3.1;
+      const desiredGap = clamp(base + n, minGap, maxGap);
       ceilings[y][x] = floorHeights[y][x] + desiredGap;
     }
   }

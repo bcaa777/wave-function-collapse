@@ -4,7 +4,7 @@ import { IComponent } from "./component";
 import { inputGroup } from "./common";
 
 interface IComponentImageUploader extends IComponent {
-  onUploadComplete?: (image: ImageData) => void;
+  onUploadComplete?: (image: ImageData & { __heightmap?: ImageData | null }) => void;
   getCurrentImage(): ImageData | null;
   clear(): void;
 }
@@ -16,11 +16,15 @@ export function createImageUploader(): IComponentImageUploader {
     clear: () => {
       // Clear the file input
       fileInput.value = '';
+      heightFileInput.value = '';
       // Clear the preview
       previewImage.src = '';
       previewImage.style.display = 'none';
+      heightPreviewImage.src = '';
+      heightPreviewImage.style.display = 'none';
       // Clear stored image data
       currentImageData = null;
+      currentHeightmap = null;
       // Disable the use button
       useImageButton.disabled = true;
       // Clear any status message
@@ -31,12 +35,18 @@ export function createImageUploader(): IComponentImageUploader {
 
   // Current uploaded image data
   let currentImageData: ImageData | null = null;
+  let currentHeightmap: ImageData | null = null;
 
   // Create UI elements
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.accept = "image/*";
   fileInput.style.marginBottom = "10px";
+
+  const heightFileInput = document.createElement("input");
+  heightFileInput.type = "file";
+  heightFileInput.accept = "image/*";
+  heightFileInput.style.marginBottom = "10px";
 
   const previewImage = document.createElement("img");
   previewImage.className = "uploadPreview";
@@ -45,6 +55,14 @@ export function createImageUploader(): IComponentImageUploader {
   previewImage.style.maxHeight = "300px";
   previewImage.style.border = "1px solid #ccc";
   previewImage.style.marginTop = "10px";
+
+  const heightPreviewImage = document.createElement("img");
+  heightPreviewImage.className = "uploadPreview";
+  heightPreviewImage.style.display = "none";
+  heightPreviewImage.style.maxWidth = "300px";
+  heightPreviewImage.style.maxHeight = "300px";
+  heightPreviewImage.style.border = "1px solid #ccc";
+  heightPreviewImage.style.marginTop = "10px";
 
   const statusMessage = document.createElement("p");
   statusMessage.style.display = "none";
@@ -59,7 +77,9 @@ export function createImageUploader(): IComponentImageUploader {
   useImageButton.style.marginTop = "10px";
   useImageButton.onclick = () => {
     if (currentImageData && component.onUploadComplete) {
-      component.onUploadComplete(currentImageData);
+      const payload = currentImageData as ImageData & { __heightmap?: ImageData | null };
+      payload.__heightmap = currentHeightmap || null;
+      component.onUploadComplete(payload);
     }
   };
 
@@ -126,6 +146,31 @@ export function createImageUploader(): IComponentImageUploader {
     }
   };
 
+  heightFileInput.onchange = async () => {
+    if (!heightFileInput.files || heightFileInput.files.length === 0) return;
+    const file = heightFileInput.files[0];
+    if (!file.type.startsWith('image/')) { showStatusMessage('Please select a valid heightmap image file.', 'error'); return; }
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) { showStatusMessage('Heightmap too large. < 10MB please.', 'error'); return; }
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      const imageData = await getImageData(objectUrl);
+      if (currentImageData && (imageData.width !== currentImageData.width || imageData.height !== currentImageData.height)) {
+        showStatusMessage('Heightmap size must match the main map size.', 'error');
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      currentHeightmap = imageData;
+      heightPreviewImage.src = objectUrl;
+      heightPreviewImage.style.display = '';
+      showStatusMessage(`Heightmap loaded: ${imageData.width}x${imageData.height}`, 'success');
+      heightPreviewImage.onload = () => URL.revokeObjectURL(objectUrl);
+    } catch (e) {
+      console.error(e);
+      showStatusMessage('Error loading heightmap image.', 'error');
+    }
+  };
+
   function showStatusMessage(message: string, type: 'success' | 'error' | 'info') {
     statusMessage.textContent = message;
     statusMessage.style.display = 'block';
@@ -166,8 +211,14 @@ export function createImageUploader(): IComponentImageUploader {
         "Select Image File: ", fileInput
       ]
     ],
+    inputGroup(), [
+      document.createElement("label"), [
+        "Optional Heightmap: ", heightFileInput
+      ]
+    ],
     statusMessage,
     previewImage,
+    heightPreviewImage,
     inputGroup(), [
       useImageButton,
       clearButton

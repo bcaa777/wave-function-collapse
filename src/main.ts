@@ -10,7 +10,8 @@ import { createImageEditor } from "./components/imageEditor";
 import { createThreeJSDungeonCrawler } from "./components/threeJSDungeonCrawler";
 import { createImageUploader } from "./components/imageUploader";
 import { createAssetManager } from "./components/assetManager";
-import { imageDataToGameMap, findPlayerStart, findPlayerFinish, GameElement } from "./colorMapping";
+import { imageDataToGameMap, findPlayerStart, findPlayerFinish, GameElement, extractHslMaps } from "./colorMapping";
+// duplicate import removed
 
 let wfc: IWaveFunctionCollapse | undefined;
 
@@ -318,6 +319,100 @@ async function startDungeonCrawler() {
 
   // Convert image to game map
   gameMap = imageDataToGameMap(generatedImageData);
+  // Derive height map in meters based on settings
+  const s = getSettings();
+  const payload = generatedImageData as ImageData & { __heightmap?: ImageData | null };
+  const customHeight = payload.__heightmap;
+  const { heights, lightnesses } = extractHslMaps(customHeight || generatedImageData);
+  let heightOverride = heights;
+  if (s.heightMode === 'procedural') {
+    const h = generatedImageData.height; const w = generatedImageData.width;
+    const freq = s.heightNoiseFrequency; const oct = s.heightNoiseOctaves;
+    const scale = s.heightScaleMeters; const base = s.heightBaseMeters;
+    const seed = s.heightSeed;
+    const proc = generateProceduralHeightMap(w, h, { frequency: freq, octaves: oct, seed });
+    // normalize 0..1 then scale
+    let min = 1e9, max = -1e9;
+    for (let y = 0; y < h; y++) { for (let x = 0; x < w; x++) { const v = proc[y][x]; if (v < min) min = v; if (v > max) max = v; } }
+    const range = Math.max(1e-6, max - min);
+    heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const n = (proc[y][x] - min) / range; // 0..1
+        heightOverride[y][x] = base + n * scale;
+      }
+    }
+    // Optional smoothing
+    for (let p = 0; p < s.heightSmoothingPasses; p++) {
+      heightOverride = s.heightBlurType === 'gaussian' ? gaussianBlurHeight(heightOverride, s.heightBlurRadius) : blurHeight(heightOverride, s.heightBlurRadius);
+    }
+    // Slope limiting and relaxation
+    heightOverride = limitSlope(heightOverride, s.heightMaxSlopePerTile, s.heightRelaxPasses);
+  } else if (customHeight) {
+    // If a custom heightmap was provided, use its lightness with scale/base; optionally quantize
+    const scale = s.heightScaleMeters;
+    const base = s.heightBaseMeters;
+    const h = customHeight.height;
+    const w = customHeight.width;
+    heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+    if (s.heightMode === 'quantized') {
+      const levels = Math.max(2, Math.floor(s.heightLevels));
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const l = lightnesses[y][x];
+          const idx = Math.round(l * (levels - 1));
+          const q = idx / (levels - 1);
+          heightOverride[y][x] = base + q * scale;
+        }
+      }
+    } else {
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const l = lightnesses[y][x];
+          heightOverride[y][x] = base + l * scale;
+        }
+      }
+    }
+    // Smooth even with heightmap
+    for (let p = 0; p < s.heightSmoothingPasses; p++) {
+      heightOverride = s.heightBlurType === 'gaussian' ? gaussianBlurHeight(heightOverride, s.heightBlurRadius) : blurHeight(heightOverride, s.heightBlurRadius);
+    }
+    heightOverride = limitSlope(heightOverride, s.heightMaxSlopePerTile, s.heightRelaxPasses);
+  } else if (s.heightMode === 'quantized') {
+    const levels = Math.max(2, Math.floor(s.heightLevels));
+    const scale = s.heightScaleMeters;
+    const base = s.heightBaseMeters;
+    const h = generatedImageData.height;
+    const w = generatedImageData.width;
+    heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const l = lightnesses[y][x]; // 0..1
+        const idx = Math.round(l * (levels - 1));
+        const q = idx / (levels - 1);
+        heightOverride[y][x] = base + q * scale;
+      }
+    }
+  } else if (s.heightMode === 'lightness') {
+    const scale = s.heightScaleMeters;
+    const base = s.heightBaseMeters;
+    const h = generatedImageData.height;
+    const w = generatedImageData.width;
+    heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const l = lightnesses[y][x];
+        heightOverride[y][x] = base + l * scale;
+      }
+    }
+  }
+  // Final smoothing for non-procedural modes
+  if (s.heightMode !== 'procedural') {
+    for (let p = 0; p < s.heightSmoothingPasses; p++) {
+      heightOverride = s.heightBlurType === 'gaussian' ? gaussianBlurHeight(heightOverride, s.heightBlurRadius) : blurHeight(heightOverride, s.heightBlurRadius);
+    }
+    heightOverride = limitSlope(heightOverride, s.heightMaxSlopePerTile, s.heightRelaxPasses);
+  }
 
   // Find player start position
   const playerStart = findPlayerStart(gameMap);
@@ -337,10 +432,156 @@ async function startDungeonCrawler() {
 
   // Start the game
   try {
-    await dungeonCrawler.startGame(gameMap, playerStart);
+    await dungeonCrawler.startGame(gameMap, playerStart, heightOverride);
   } catch (error: any) {
     console.error('Failed to start game:', error);
   }
+}
+
+function generateProceduralHeightMap(width: number, height: number, opts: { frequency: number; octaves: number; seed: number }): number[][] {
+  // Simple fractal noise using the same noise from terrain.ts style
+  const { frequency, octaves, seed } = opts;
+  const rnd = mulberry32(seed);
+  const noise2 = valueNoise2D(seed);
+  const map: number[][] = Array.from({ length: height }, () => new Array(width).fill(0));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let amp = 1.0; let freq = frequency; let val = 0; let norm = 0;
+      for (let o = 0; o < octaves; o++) {
+        val += noise2(x * 0.05 * freq, y * 0.05 * freq) * amp;
+        norm += amp; amp *= 0.5; freq *= 2.0;
+      }
+      map[y][x] = val / Math.max(1e-6, norm);
+    }
+  }
+  return map;
+}
+
+function valueNoise2D(seed: number) {
+  const rand = mulberry32(seed);
+  const grid = new Map<string, number>();
+  function rnd(ix: number, iy: number) {
+    const key = ix + ',' + iy;
+    if (!grid.has(key)) grid.set(key, rand());
+    return grid.get(key)!;
+  }
+  function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+  function smoothstep(t: number) { return t * t * (3 - 2 * t); }
+  return (x: number, y: number) => {
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    const tx = x - x0, ty = y - y0;
+    const v00 = rnd(x0, y0);
+    const v10 = rnd(x0 + 1, y0);
+    const v01 = rnd(x0, y0 + 1);
+    const v11 = rnd(x0 + 1, y0 + 1);
+    const u = smoothstep(tx), v = smoothstep(ty);
+    const a = lerp(v00, v10, u);
+    const b = lerp(v01, v11, u);
+    return lerp(a, b, v) * 2 - 1; // -1..1
+  };
+}
+
+function mulberry32(a: number) {
+  return function() {
+    let t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function blurHeight(hm: number[][], radius: number): number[][] {
+  if (radius <= 0) return hm;
+  const rows = hm.length, cols = hm[0].length;
+  const out: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  const r = Math.max(1, radius);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let sum = 0, count = 0;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) { sum += hm[ny][nx]; count++; }
+        }
+      }
+      out[y][x] = sum / Math.max(1, count);
+    }
+  }
+  return out;
+}
+
+function gaussianKernel1D(radius: number): number[] {
+  const r = Math.max(1, radius);
+  const sigma = r / 1.5;
+  const k = [] as number[];
+  let sum = 0;
+  for (let i = -r; i <= r; i++) {
+    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+    k.push(v); sum += v;
+  }
+  return k.map(v => v / sum);
+}
+
+function gaussianBlurHeight(hm: number[][], radius: number): number[][] {
+  if (radius <= 0) return hm;
+  const rows = hm.length, cols = hm[0].length;
+  const kr = Math.max(1, radius);
+  const kernel = gaussianKernel1D(kr);
+  // horizontal pass
+  const temp: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let sum = 0;
+      for (let i = -kr; i <= kr; i++) {
+        const nx = Math.min(cols - 1, Math.max(0, x + i));
+        sum += hm[y][nx] * kernel[i + kr];
+      }
+      temp[y][x] = sum;
+    }
+  }
+  // vertical pass
+  const out: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let sum = 0;
+      for (let i = -kr; i <= kr; i++) {
+        const ny = Math.min(rows - 1, Math.max(0, y + i));
+        sum += temp[ny][x] * kernel[i + kr];
+      }
+      out[y][x] = sum;
+    }
+  }
+  return out;
+}
+
+function limitSlope(hm: number[][], maxSlopePerTile: number, relaxPasses: number): number[][] {
+  if (maxSlopePerTile <= 0) return hm;
+  const rows = hm.length, cols = hm[0].length;
+  const out: number[][] = hm.map(row => row.slice());
+  for (let p = 0; p < Math.max(0, relaxPasses); p++) {
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const h0 = out[y][x];
+        let sum = h0, cnt = 1;
+        // 4-neighborhood
+        const nb = [[1,0],[-1,0],[0,1],[0,-1]] as Array<[number,number]>;
+        for (const [dx, dy] of nb) {
+          const nx = x + dx, ny = y + dy;
+          if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
+          const hN = out[ny][nx];
+          const diff = hN - h0;
+          if (Math.abs(diff) > maxSlopePerTile) {
+            const clamped = h0 + Math.sign(diff) * maxSlopePerTile;
+            sum += clamped; cnt++;
+          } else {
+            sum += hN; cnt++;
+          }
+        }
+        out[y][x] = sum / cnt;
+      }
+    }
+  }
+  return out;
 }
 
 // Mode tab event listeners

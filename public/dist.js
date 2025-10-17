@@ -869,7 +869,20 @@ System.register("gameSettings", [], function (exports_13, context_13) {
                 paletteMode: 0,
                 useProceduralSprites: true,
                 spriteOverrides: new Map(),
-                textureOverrides: new Map()
+                textureOverrides: new Map(),
+                heightMode: 'quantized',
+                heightScaleMeters: 6.0,
+                heightLevels: 6,
+                heightBaseMeters: 0.0,
+                heightSmoothingPasses: 2,
+                heightBlurRadius: 1,
+                heightBlurType: 'gaussian',
+                heightNoiseFrequency: 1.2,
+                heightNoiseOctaves: 4,
+                heightSeed: 1337,
+                heightMaxSlopePerTile: 0.25,
+                heightRelaxPasses: 1,
+                heightMeshSubdivision: 2
             };
             listeners = new Set();
         }
@@ -919,6 +932,103 @@ System.register("components/settingsPanel", ["gameSettings"], function (exports_
         row.appendChild(col(lightInput, 'Player Light'));
         row.appendChild(col(postToggle, 'Post FX'));
         row.appendChild(col(paletteSelect, 'Palette'));
+        // Height controls
+        const modeSel = document.createElement('select');
+        ['lightness', 'quantized', 'heightmap', 'procedural'].forEach((m) => { const o = document.createElement('option'); o.value = m; o.text = m; modeSel.appendChild(o); });
+        modeSel.value = s.heightMode || 'quantized';
+        modeSel.onchange = () => gameSettings_1.setSetting('heightMode', modeSel.value);
+        row.appendChild(col(modeSel, 'Height Mode'));
+        const scaleInput = document.createElement('input');
+        scaleInput.type = 'range';
+        scaleInput.min = '1';
+        scaleInput.max = '50';
+        scaleInput.step = '1';
+        scaleInput.value = String(s.heightScaleMeters ?? 6);
+        scaleInput.oninput = () => gameSettings_1.setSetting('heightScaleMeters', parseFloat(scaleInput.value));
+        row.appendChild(col(scaleInput, 'Height Scale (m)'));
+        const levelsInput = document.createElement('input');
+        levelsInput.type = 'range';
+        levelsInput.min = '2';
+        levelsInput.max = '20';
+        levelsInput.step = '1';
+        levelsInput.value = String(s.heightLevels ?? 6);
+        levelsInput.oninput = () => gameSettings_1.setSetting('heightLevels', parseInt(levelsInput.value, 10));
+        row.appendChild(col(levelsInput, 'Levels'));
+        const baseInput = document.createElement('input');
+        baseInput.type = 'number';
+        baseInput.step = '0.5';
+        baseInput.value = String(s.heightBaseMeters ?? 0);
+        baseInput.oninput = () => gameSettings_1.setSetting('heightBaseMeters', parseFloat(baseInput.value));
+        row.appendChild(col(baseInput, 'Base (m)'));
+        // Procedural params
+        const smoothInput = document.createElement('input');
+        smoothInput.type = 'range';
+        smoothInput.min = '0';
+        smoothInput.max = '5';
+        smoothInput.step = '1';
+        smoothInput.value = String(s.heightSmoothingPasses ?? 2);
+        smoothInput.oninput = () => gameSettings_1.setSetting('heightSmoothingPasses', parseInt(smoothInput.value, 10));
+        row.appendChild(col(smoothInput, 'Smooth Passes'));
+        const blurInput = document.createElement('input');
+        blurInput.type = 'range';
+        blurInput.min = '0';
+        blurInput.max = '3';
+        blurInput.step = '1';
+        blurInput.value = String(s.heightBlurRadius ?? 1);
+        blurInput.oninput = () => gameSettings_1.setSetting('heightBlurRadius', parseInt(blurInput.value, 10));
+        row.appendChild(col(blurInput, 'Blur Radius'));
+        const blurType = document.createElement('select');
+        ;
+        ['box', 'gaussian'].forEach((m) => { const o = document.createElement('option'); o.value = m; o.text = m; blurType.appendChild(o); });
+        blurType.value = s.heightBlurType ?? 'gaussian';
+        blurType.onchange = () => gameSettings_1.setSetting('heightBlurType', blurType.value);
+        row.appendChild(col(blurType, 'Blur Type'));
+        const freqInput = document.createElement('input');
+        freqInput.type = 'range';
+        freqInput.min = '0.5';
+        freqInput.max = '6';
+        freqInput.step = '0.1';
+        freqInput.value = String(s.heightNoiseFrequency ?? 1.2);
+        freqInput.oninput = () => gameSettings_1.setSetting('heightNoiseFrequency', parseFloat(freqInput.value));
+        row.appendChild(col(freqInput, 'Noise Freq'));
+        const octInput = document.createElement('input');
+        octInput.type = 'range';
+        octInput.min = '1';
+        octInput.max = '6';
+        octInput.step = '1';
+        octInput.value = String(s.heightNoiseOctaves ?? 4);
+        octInput.oninput = () => gameSettings_1.setSetting('heightNoiseOctaves', parseInt(octInput.value, 10));
+        row.appendChild(col(octInput, 'Octaves'));
+        const seedInput = document.createElement('input');
+        seedInput.type = 'number';
+        seedInput.step = '1';
+        seedInput.value = String(s.heightSeed ?? 1337);
+        seedInput.oninput = () => gameSettings_1.setSetting('heightSeed', parseInt(seedInput.value, 10));
+        row.appendChild(col(seedInput, 'Seed'));
+        const slopeInput = document.createElement('input');
+        slopeInput.type = 'range';
+        slopeInput.min = '0.05';
+        slopeInput.max = '1.0';
+        slopeInput.step = '0.05';
+        slopeInput.value = String(s.heightMaxSlopePerTile ?? 0.25);
+        slopeInput.oninput = () => gameSettings_1.setSetting('heightMaxSlopePerTile', parseFloat(slopeInput.value));
+        row.appendChild(col(slopeInput, 'Max Slope m/tile'));
+        const relaxInput = document.createElement('input');
+        relaxInput.type = 'range';
+        relaxInput.min = '0';
+        relaxInput.max = '4';
+        relaxInput.step = '1';
+        relaxInput.value = String(s.heightRelaxPasses ?? 1);
+        relaxInput.oninput = () => gameSettings_1.setSetting('heightRelaxPasses', parseInt(relaxInput.value, 10));
+        row.appendChild(col(relaxInput, 'Relax Passes'));
+        const subdivInput = document.createElement('input');
+        subdivInput.type = 'range';
+        subdivInput.min = '1';
+        subdivInput.max = '4';
+        subdivInput.step = '1';
+        subdivInput.value = String(s.heightMeshSubdivision ?? 2);
+        subdivInput.oninput = () => gameSettings_1.setSetting('heightMeshSubdivision', parseInt(subdivInput.value, 10));
+        row.appendChild(col(subdivInput, 'Mesh Subdiv'));
         // Overrides available on the Assets page
         el.appendChild(row);
         return component;
@@ -1056,6 +1166,13 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
             presetChoices.push({ label: preset.name || "", value: preset });
         }
         const presetSelect = inputs_2.createSelectInput("Preset", presetChoices);
+        // HSL demo presets (programmatic)
+        const hslDemoChoices = [
+            { label: "HSL: Terraces + Stairs", value: "terraces" },
+            { label: "HSL: Biomes + Heights", value: "biomes" },
+            { label: "HSL: Ramp 0-100m", value: "ramp" },
+        ];
+        const hslSelect = inputs_2.createSelectInput("HSL Demo", hslDemoChoices);
         imageInput.onchange = () => {
             if (imageInput.files) {
                 const path = URL.createObjectURL(imageInput.files[0]);
@@ -1073,12 +1190,21 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
             previewImage.src = path;
             previewImage.style.display = "";
         };
+        hslSelect.onInput = (kind) => {
+            imageInput.value = "";
+            const image = generateHslDemo(kind);
+            onPick(image, {});
+            previewImage.style.display = "none";
+        };
         util_3.buildDomTree(presetPicker.domElement, [
             document.createElement("p"), [
                 "Select a preset or upload a custom image. Custom images should be simple - e.g. less than 64x64 pixels, with only a handful of colors.",
             ],
             common_2.inputGroup(), [
                 presetSelect.domElement,
+            ],
+            common_2.inputGroup(), [
+                hslSelect.domElement,
             ],
             common_2.inputGroup(), [
                 document.createElement("label"), [
@@ -1090,6 +1216,92 @@ System.register("components/presetPicker", ["getImageData", "util", "components/
         return presetPicker;
     }
     exports_17("createPresetPicker", createPresetPicker);
+    function generateHslDemo(kind) {
+        const w = 48, h = 48;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        function put(x, y, r, g, b) {
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(x, y, 1, 1);
+        }
+        // Helper fixed colors for start/finish and stairs
+        const START = [0x00, 0x64, 0x00]; // #006400
+        const FINISH = [0x8B, 0x00, 0x00]; // #8B0000
+        const STAIRS = [0xC0, 0xC0, 0xC0]; // #C0C0C0
+        const WALL = [0x00, 0x00, 0x00]; // #000000
+        if (kind === 'ramp') {
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const l = Math.round((x / (w - 1)) * 255); // 0..255
+                    // Use green hue for walkable floor, lightness encodes height
+                    put(x, y, l * 0.2, Math.min(255, l + 40), l * 0.2);
+                }
+            }
+            // start and finish
+            put(2, Math.floor(h / 2), START[0], START[1], START[2]);
+            put(w - 3, Math.floor(h / 2), FINISH[0], FINISH[1], FINISH[2]);
+            return (ctx.getImageData(0, 0, w, h));
+        }
+        if (kind === 'biomes') {
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const band = Math.floor((y / h) * 4);
+                    const l = Math.round((x / (w - 1)) * 200 + 30);
+                    if (band === 0) { // water band (blue)
+                        put(x, y, 40, 80, Math.min(255, l));
+                    }
+                    else if (band === 1) { // grass band (green)
+                        put(x, y, 30, Math.min(255, l), 30);
+                    }
+                    else if (band === 2) { // danger band (red)
+                        put(x, y, Math.min(255, l), 30, 30);
+                    }
+                    else { // fire band (orange)
+                        put(x, y, Math.min(255, l), Math.round(l * 0.6), 20);
+                    }
+                }
+            }
+            // walls strip on left/right
+            for (let y = 0; y < h; y++) {
+                put(0, y, WALL[0], WALL[1], WALL[2]);
+                put(w - 1, y, WALL[0], WALL[1], WALL[2]);
+            }
+            // start and finish
+            put(2, 2, START[0], START[1], START[2]);
+            put(w - 3, h - 3, FINISH[0], FINISH[1], FINISH[2]);
+            return ctx.getImageData(0, 0, w, h);
+        }
+        // terraces
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const tier = Math.floor((y / h) * 5); // 5 terraces
+                const l = 40 + tier * 35; // step in lightness
+                // neutral floor hue (greenish)
+                put(x, y, 40, Math.min(255, l), 40);
+            }
+        }
+        // draw horizontal stair lines between terraces using light gray
+        for (let t = 1; t < 5; t++) {
+            const yLine = Math.floor((t * h) / 5);
+            for (let x = 4; x < w - 4; x++)
+                put(x, yLine, STAIRS[0], STAIRS[1], STAIRS[2]);
+        }
+        // perimeter walls
+        for (let y = 0; y < h; y++) {
+            put(0, y, WALL[0], WALL[1], WALL[2]);
+            put(w - 1, y, WALL[0], WALL[1], WALL[2]);
+        }
+        for (let x = 0; x < w; x++) {
+            put(x, 0, WALL[0], WALL[1], WALL[2]);
+            put(x, h - 1, WALL[0], WALL[1], WALL[2]);
+        }
+        // start/finish
+        put(2, 2, START[0], START[1], START[2]);
+        put(w - 3, h - 3, FINISH[0], FINISH[1], FINISH[2]);
+        return ctx.getImageData(0, 0, w, h);
+    }
     return {
         setters: [
             function (getImageData_1_1) {
@@ -1129,6 +1341,37 @@ System.register("colorMapping", [], function (exports_18, context_18) {
         return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
     }
     exports_18("rgbToHex", rgbToHex);
+    function rgbToHsl(r, g, b) {
+        const rn = r / 255;
+        const gn = g / 255;
+        const bn = b / 255;
+        const max = Math.max(rn, gn, bn);
+        const min = Math.min(rn, gn, bn);
+        let h = 0;
+        let s = 0;
+        const l = (max + min) / 2;
+        const d = max - min;
+        if (d !== 0) {
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case rn:
+                    h = (gn - bn) / d + (gn < bn ? 6 : 0);
+                    break;
+                case gn:
+                    h = (bn - rn) / d + 2;
+                    break;
+                default:
+                    h = (rn - gn) / d + 4;
+            }
+            h *= 60;
+        }
+        else {
+            h = 0;
+            s = 0;
+        }
+        return { h, s, l };
+    }
+    exports_18("rgbToHsl", rgbToHsl);
     function colorDistance(color1, color2) {
         return Math.sqrt(Math.pow(color1.r - color2.r, 2) +
             Math.pow(color1.g - color2.g, 2) +
@@ -1164,7 +1407,15 @@ System.register("colorMapping", [], function (exports_18, context_18) {
                 const r = data[index];
                 const g = data[index + 1];
                 const b = data[index + 2];
-                const element = findClosestColor(r, g, b, mappings);
+                // First try exact palette match; if not close, classify by hue
+                let element = findClosestColor(r, g, b, mappings);
+                // If it matched to FLOOR and the color isn't exactly white, use hue to classify
+                const hex = rgbToHex(r, g, b).toUpperCase();
+                const isExactMapped = mappings[hex] !== undefined;
+                if (!isExactMapped) {
+                    const hsl = rgbToHsl(r, g, b);
+                    element = classifyElementByHue(hsl);
+                }
                 row.push(element);
             }
             gameMap.push(row);
@@ -1172,6 +1423,64 @@ System.register("colorMapping", [], function (exports_18, context_18) {
         return gameMap;
     }
     exports_18("imageDataToGameMap", imageDataToGameMap);
+    // Classify a tile to a coarse GameElement based on hue; saturation reserved for future
+    function classifyElementByHue(hsl) {
+        const h = hsl.h;
+        const s = hsl.s;
+        // If near grayscale and very dark, consider wall to allow hand-authored maps
+        if (s < 0.05 && hsl.l < 0.15)
+            return GameElement.WALL;
+        // Blue → water
+        if (h >= 190 && h <= 260)
+            return GameElement.WATER;
+        // Green → grass
+        if (h >= 80 && h <= 160)
+            return GameElement.GRASS;
+        // Orange → fire
+        if (h >= 20 && h <= 40)
+            return GameElement.FIRE;
+        // Red → danger
+        if (h >= 340 || h <= 10)
+            return GameElement.DANGER;
+        // Magenta → enemy
+        if (h >= 280 && h <= 320)
+            return GameElement.ENEMY;
+        // Yellow → treasure
+        if (h >= 50 && h <= 70)
+            return GameElement.TREASURE;
+        // Cyan → key
+        if (h >= 170 && h <= 185)
+            return GameElement.KEY;
+        // Brown-ish low saturation orange → door
+        if (h >= 15 && h <= 35 && s < 0.35)
+            return GameElement.DOOR;
+        // Light gray → stairs
+        if (s < 0.08 && hsl.l > 0.7)
+            return GameElement.STAIRS;
+        return GameElement.FLOOR;
+    }
+    exports_18("classifyElementByHue", classifyElementByHue);
+    // Extract per-pixel HSL and derived height (meters) from the bitmap
+    function extractHslMaps(imageData) {
+        const { data, width, height } = imageData;
+        const heights = Array.from({ length: height }, () => new Array(width).fill(0));
+        const hues = Array.from({ length: height }, () => new Array(width).fill(0));
+        const sats = Array.from({ length: height }, () => new Array(width).fill(0));
+        const lights = Array.from({ length: height }, () => new Array(width).fill(0));
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const idx = (y * width + x) * 4;
+                const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+                const hsl = rgbToHsl(r, g, b);
+                hues[y][x] = hsl.h;
+                sats[y][x] = hsl.s;
+                lights[y][x] = hsl.l;
+                heights[y][x] = hsl.l * 100.0; // meters 0..100
+            }
+        }
+        return { heights, hues, saturations: sats, lightnesses: lights };
+    }
+    exports_18("extractHslMaps", extractHslMaps);
     // Find player start position
     function findPlayerStart(gameMap) {
         for (let y = 0; y < gameMap.length; y++) {
@@ -2324,72 +2633,11 @@ System.register("components/terrain", ["colorMapping"], function (exports_22, co
     // Build a per-tile height map from the color-based game map.
     // Units are in world meters; positive raises ground, negative lowers.
     function buildHeightMap(gameMap) {
+        // Default fallback heightmap when none is provided by the caller.
+        // Do NOT derive height from tile types; return a flat zero map matching the grid size.
         const rows = gameMap.length;
         const cols = gameMap[0].length;
-        const heights = Array.from({ length: rows }, () => new Array(cols).fill(0));
-        // Base assignment from element types
-        for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-                const el = gameMap[y][x];
-                let h = 0;
-                switch (el) {
-                    case colorMapping_3.GameElement.WATER:
-                        h = -0.35;
-                        break; // water basins
-                    case colorMapping_3.GameElement.GRASS:
-                        h = 0.0;
-                        break; // base, will add noise later
-                    case colorMapping_3.GameElement.DANGER:
-                        h = -0.05;
-                        break;
-                    case colorMapping_3.GameElement.FIRE:
-                        h = 0.0;
-                        break;
-                    default:
-                        h = 0.0;
-                        break;
-                }
-                heights[y][x] = h;
-            }
-        }
-        // Add gentle noise hills constrained by walls (keep walls flat)
-        const noise = createSimplexLikeNoise(1337);
-        for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-                if (gameMap[y][x] === colorMapping_3.GameElement.WALL)
-                    continue;
-                const nx = x / Math.max(1, cols);
-                const ny = y / Math.max(1, rows);
-                const n = noise(nx * 2.0, ny * 2.0) * 0.12; // amplitude
-                heights[y][x] += n;
-            }
-        }
-        // Simple smoothing pass to soften steps (excluding walls)
-        const out = Array.from({ length: rows }, () => new Array(cols).fill(0));
-        for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-                let sum = 0;
-                let count = 0;
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dx = -1; dx <= 1; dx++) {
-                        const nx = x + dx, ny = y + dy;
-                        if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
-                            sum += heights[ny][nx];
-                            count++;
-                        }
-                    }
-                }
-                out[y][x] = sum / Math.max(1, count);
-            }
-        }
-        // Keep walls at 0 height for clean vertical faces
-        for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-                if (gameMap[y][x] === colorMapping_3.GameElement.WALL)
-                    out[y][x] = 0;
-            }
-        }
-        return out;
+        return Array.from({ length: rows }, () => new Array(cols).fill(0));
     }
     exports_22("buildHeightMap", buildHeightMap);
     // Bilinear interpolation of ground height at fractional position
@@ -2482,16 +2730,10 @@ System.register("components/terrain", ["colorMapping"], function (exports_22, co
                 const nx = x / Math.max(1, cols);
                 const ny = y / Math.max(1, rows);
                 const base = 2.3; // base clearance in meters
-                const n = noise(nx * 1.5, ny * 1.5) * 0.5; // -0.5..0.5
-                let extra = 0.0;
-                const el = gameMap[y][x];
-                if (el === colorMapping_3.GameElement.WATER)
-                    extra += 0.4; // taller cavern over water
-                if (el === colorMapping_3.GameElement.DANGER || el === colorMapping_3.GameElement.FIRE)
-                    extra -= 0.2; // tighter, oppressive feel
-                const minGap = 1.8;
-                const maxGap = 3.3;
-                const desiredGap = clamp(base + n + extra, minGap, maxGap);
+                const n = noise(nx * 1.2, ny * 1.2) * 0.35; // -0.35..0.35
+                const minGap = 1.9;
+                const maxGap = 3.1;
+                const desiredGap = clamp(base + n, minGap, maxGap);
                 ceilings[y][x] = floorHeights[y][x] + desiredGap;
             }
         }
@@ -2743,8 +2985,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
     function createThreeJSDungeonCrawler() {
         const component = {
             domElement: Object.assign(document.createElement("div"), { className: "threeJSDungeonCrawlerComponent" }),
-            startGame: async (gameMap, playerStart) => {
-                await initializeGame(gameMap, playerStart);
+            startGame: async (gameMap, playerStart, heightOverrideMeters) => {
+                await initializeGame(gameMap, playerStart, heightOverrideMeters);
             },
             stopGame: () => {
                 if (animationId) {
@@ -2789,6 +3031,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         let currentGameMap = [];
         let heightMap = [];
         let ceilingMap = [];
+        let stairsGroup = null;
         let enemies = [];
         let gameRunning = false;
         // Player state
@@ -2807,6 +3050,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         const SCALE_FACTOR = 1; // Upscale to 960x640
         const DISPLAY_SCALE = 4; // final on-screen scale (crisp, nearest)
         const WALL_HEIGHT = 2.0;
+        const DISABLE_WALLS = true; // temporarily remove walls (visuals + collisions)
         const MOVE_SPEED = 0.05;
         const ROTATE_SPEED = 0.03;
         // Vertical movement
@@ -2826,19 +3070,14 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         // Debug variables
         let debugMode = false;
         let debugSpheres = [];
-        // Particle system variables
-        let particleSystems = new Map();
-        let transientSplashSystems = [];
-        let lastInWater = false;
-        let landingCooldown = 0;
+        // Particle systems removed for cleaner visuals and performance
         let fireLights = [];
-        const glowSprites = [];
         // Visibility/occlusion data
         const VISIBILITY_RADIUS = 10;
         let visibilityFrameCounter = 0;
         const VISIBILITY_UPDATE_INTERVAL = 2; // Update every 2 frames
         const wallMeshMap = new Map();
-        async function initializeGame(gameMap, playerStart) {
+        async function initializeGame(gameMap, playerStart, heightOverrideMeters) {
             currentGameMap = gameMap;
             player.x = playerStart.x + 0.5;
             player.y = playerStart.y + 0.5;
@@ -2866,7 +3105,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             // Initialize Three.js scene
             await setupThreeJS();
             // Create the dungeon geometry
-            heightMap = terrain_1.buildHeightMap(currentGameMap);
+            heightMap = heightOverrideMeters && heightOverrideMeters.length ? heightOverrideMeters : terrain_1.buildHeightMap(currentGameMap);
             ceilingMap = terrain_1.buildCeilingMap(currentGameMap, heightMap);
             createDungeon();
             // In case the spawn is blocked, relocate to nearest walkable tile
@@ -2882,10 +3121,11 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             scene.background = new THREE.Color(0x202030);
             // Create camera
             camera = new THREE.PerspectiveCamera(75, BASE_WIDTH / BASE_HEIGHT, 0.1, 1000);
-            camera.far = 21; // near the 20m fog distance to avoid popping
+            camera.far = 300; // expanded for large vertical ranges
             camera.updateProjectionMatrix();
             camera.position.set(player.x, 1, player.y);
-            camera.lookAt(player.x + Math.cos(player.angle), 1, player.y + Math.sin(player.angle));
+            const groundH0 = (heightMap && heightMap.length > 0) ? terrain_1.sampleHeightBilinear(heightMap, player.x, player.y) : 0;
+            camera.lookAt(player.x + Math.cos(player.angle), groundH0 + 1, player.y + Math.sin(player.angle));
             // Create renderer with upscaling
             renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
             renderer.setSize(BASE_WIDTH, BASE_HEIGHT);
@@ -3187,13 +3427,13 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             playerTorch.shadow.mapSize.width = 2048;
             playerTorch.shadow.mapSize.height = 2048;
             playerTorch.shadow.camera.near = 0.1;
-            playerTorch.shadow.camera.far = 24;
+            playerTorch.shadow.camera.far = 120;
             playerTorch.shadow.bias = -0.0002;
             scene.add(playerTorch);
             // Store reference to player torch for updates
             scene.playerTorch = playerTorch;
             // Softer, farther fog so the scene is not too dark
-            scene.fog = new THREE.Fog(0x202030, 8, 20);
+            scene.fog = new THREE.Fog(0x202030, 18, 80);
             // React to runtime settings changes (light intensity and post)
             gameSettings_2.onSettingsChange((key) => {
                 if (key === 'playerLightIntensity') {
@@ -3206,20 +3446,23 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             const mapHeight = currentGameMap.length;
             // Create floor
             createFloor(mapWidth, mapHeight);
-            // Create walls
+            // Create walls (disabled for now)
             createWalls(mapWidth, mapHeight);
+            // Create stairs bridging height gaps between adjacent walkable tiles
+            createStairs(mapWidth, mapHeight);
             // Create sprites for interactive elements
             createSprites();
-            // Create particle effects for atmospheric elements
-            createParticleEffects();
+            // Setup fire lights for flame tiles (particles removed)
+            createFireLightsForMap();
             // Initialize debug visualization
             createDebugSpheres();
             // Initial visibility update to prevent overdraw on first frames
             updateVisibility();
         }
         function createFloor(width, height) {
-            // Create a height-aware floor using a grid of segments
-            const floorGeometry = new THREE.PlaneGeometry(width, height, width, height);
+            // Create a height-aware floor; allow extra subdivisions for smoothness
+            const subdiv = Math.max(1, Math.min(4, gameSettings_2.getSettings().heightMeshSubdivision || 1));
+            const floorGeometry = new THREE.PlaneGeometry(width, height, width * subdiv, height * subdiv);
             // Load floor texture
             const floorTexture = textureLoader.load('textures/floor_stone.png');
             floorTexture.wrapS = THREE.RepeatWrapping;
@@ -3244,12 +3487,13 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             });
             // Apply per-vertex heights from heightMap
             const pos = floorGeometry.attributes.position;
-            for (let y = 0; y <= height; y++) {
-                for (let x = 0; x <= width; x++) {
-                    const idx = (y * (width + 1) + x) * 3;
+            const vprFloor = width * subdiv + 1; // vertices per row
+            for (let y = 0; y <= height * subdiv; y++) {
+                for (let x = 0; x <= width * subdiv; x++) {
+                    const idx = (y * vprFloor + x) * 3;
                     // PlaneGeometry is centered; offset to grid space
-                    const gx = x - 0.5;
-                    const gy = y - 0.5;
+                    const gx = x / subdiv - 0.5;
+                    const gy = y / subdiv - 0.5;
                     const h = terrain_1.sampleHeightBilinear(heightMap, gx, gy);
                     // Before rotation, z becomes world Y after we rotate floor by -PI/2
                     pos.array[idx + 2] = h;
@@ -3267,7 +3511,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
         }
         function createCeiling(width, height) {
             // Create ceiling geometry with per-vertex heights from ceilingMap
-            const ceilingGeometry = new THREE.PlaneGeometry(width, height, width, height);
+            const subdiv = Math.max(1, Math.min(4, gameSettings_2.getSettings().heightMeshSubdivision || 1));
+            const ceilingGeometry = new THREE.PlaneGeometry(width, height, width * subdiv, height * subdiv);
             // Load ceiling texture
             const ceilingTexture = textureLoader.load('textures/ceiling_stone.png');
             ceilingTexture.wrapS = THREE.RepeatWrapping;
@@ -3291,11 +3536,12 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             });
             // Height displacements: encode gap by moving vertices down locally
             const pos = ceilingGeometry.attributes.position;
-            for (let y = 0; y <= height; y++) {
-                for (let x = 0; x <= width; x++) {
-                    const idx = (y * (width + 1) + x) * 3;
-                    const gx = x - 0.5;
-                    const gy = y - 0.5;
+            const vprCeil = width * subdiv + 1;
+            for (let y = 0; y <= height * subdiv; y++) {
+                for (let x = 0; x <= width * subdiv; x++) {
+                    const idx = (y * vprCeil + x) * 3;
+                    const gx = x / subdiv - 0.5;
+                    const gy = y / subdiv - 0.5;
                     const cH = terrain_1.sampleCeilingBilinear(ceilingMap, gx, gy);
                     pos.array[idx + 2] = cH; // will rotate to face down
                 }
@@ -3309,59 +3555,162 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             scene.add(ceiling);
         }
         function createWalls(width, height) {
+            if (DISABLE_WALLS)
+                return; // skip visual walls entirely
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
                     const element = currentGameMap[y][x];
                     const properties = colorMapping_4.getElementProperties(element);
                     if (!properties.walkable) {
-                        createWall(x, y, element);
+                        createWallFaces(x, y, element);
                     }
                 }
             }
         }
-        function createWall(x, y, element) {
-            // Create wall geometry that exactly matches the collision detection expectations
-            // Wall should be 1x1 units in X and Z, WALL_HEIGHT in Y
-            const wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
-            // Create material array for all 6 faces of the cube to ensure consistent texturing
+        function createWallFaces(x, y, element) {
             const wallTexture = getWallTexture(element);
-            const baseMatParams = { map: wallTexture, roughness: 0.9, metalness: 0.0, emissive: new THREE.Color(0x121820), emissiveIntensity: 0.1 };
-            const wallMaterial = [
-                new THREE.MeshStandardMaterial(baseMatParams),
-                new THREE.MeshStandardMaterial(baseMatParams),
-                new THREE.MeshStandardMaterial(baseMatParams),
-                new THREE.MeshStandardMaterial(baseMatParams),
-                new THREE.MeshStandardMaterial(baseMatParams),
-                new THREE.MeshStandardMaterial(baseMatParams)
+            const mat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.9, metalness: 0.0, emissive: new THREE.Color(0x121820), emissiveIntensity: 0.08, side: THREE.FrontSide });
+            // For each of 4 edges, if neighbor is walkable or out of bounds, create a vertical face conforming to ground
+            const edges = [
+                { dx: 1, dy: 0 }, // east
+                { dx: -1, dy: 0 }, // west
+                { dx: 0, dy: 1 }, // south
+                { dx: 0, dy: -1 } // north
             ];
-            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-            // Position wall at grid coordinates (x, y)
-            const groundH = terrain_1.sampleHeightBilinear(heightMap, x, y);
-            wall.position.set(x, groundH + WALL_HEIGHT / 2, y);
-            wall.castShadow = true;
-            wall.receiveShadow = true;
-            wall.rotation.y = 0;
-            wall.name = `wall_${x}_${y}`;
-            if (debugMode) {
-                const wireframeGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
-                const wireframeMaterial = new THREE.MeshBasicMaterial({
-                    color: 0xff0000,
-                    wireframe: true,
-                    transparent: true,
-                    opacity: 0.3
-                });
-                const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-                wireframe.position.copy(wall.position);
-                wireframe.name = `wireframe_${x}_${y}`;
-                scene.add(wireframe);
+            for (const e of edges) {
+                const nx = x + e.dx;
+                const ny = y + e.dy;
+                const neighborWalkable = (ny < 0 || ny >= currentGameMap.length || nx < 0 || nx >= currentGameMap[0].length)
+                    ? true
+                    : colorMapping_4.getElementProperties(currentGameMap[ny][nx]).walkable;
+                if (!neighborWalkable)
+                    continue;
+                // Edge endpoints in world (XZ plane), with vertical Y from heightMap
+                let p0x = x, p0z = y, p1x = x, p1z = y;
+                if (e.dx === 1 && e.dy === 0) { // east edge: x+0.5, y-0.5 -> y+0.5
+                    p0x = x + 0.5;
+                    p0z = y - 0.5;
+                    p1x = x + 0.5;
+                    p1z = y + 0.5;
+                }
+                else if (e.dx === -1 && e.dy === 0) { // west edge: x-0.5, y+0.5 -> y-0.5
+                    p0x = x - 0.5;
+                    p0z = y + 0.5;
+                    p1x = x - 0.5;
+                    p1z = y - 0.5;
+                }
+                else if (e.dx === 0 && e.dy === 1) { // south edge: x+0.5, y+0.5 -> x-0.5, y+0.5
+                    p0x = x + 0.5;
+                    p0z = y + 0.5;
+                    p1x = x - 0.5;
+                    p1z = y + 0.5;
+                }
+                else if (e.dx === 0 && e.dy === -1) { // north edge: x-0.5, y-0.5 -> x+0.5, y-0.5
+                    p0x = x - 0.5;
+                    p0z = y - 0.5;
+                    p1x = x + 0.5;
+                    p1z = y - 0.5;
+                }
+                const b0y = terrain_1.sampleHeightBilinear(heightMap, p0x, p0z);
+                const b1y = terrain_1.sampleHeightBilinear(heightMap, p1x, p1z);
+                const t0y = b0y + WALL_HEIGHT;
+                const t1y = b1y + WALL_HEIGHT;
+                // Build a quad (two triangles) with vertices ordered to face outward toward the neighbor
+                const vertices = [
+                    p0x, b0y, p0z,
+                    p1x, b1y, p1z,
+                    p1x, t1y, p1z,
+                    p0x, b0y, p0z,
+                    p1x, t1y, p1z,
+                    p0x, t0y, p0z,
+                ];
+                const uvs = [
+                    0, 0,
+                    1, 0,
+                    1, 1,
+                    0, 0,
+                    1, 1,
+                    0, 1,
+                ];
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+                geometry.computeVertexNormals();
+                const mesh = new THREE.Mesh(geometry, mat);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
             }
-            scene.add(wall);
-            // Track wall for occlusion/visibility control
-            wallMeshMap.set(`${x},${y}`, wall);
-            // DEBUG: Log wall creation for debugging
-            if (debugMode) {
-                console.log(`Created wall at (${x}, ${y}) - occupies space: (${(x - 0.5).toFixed(2)}, 0, ${(y - 0.5).toFixed(2)}) to (${(x + 0.5).toFixed(2)}, ${WALL_HEIGHT.toFixed(2)}, ${(y + 0.5).toFixed(2)})`);
+        }
+        function createStairs(width, height) {
+            if (stairsGroup) {
+                scene.remove(stairsGroup);
+                stairsGroup = null;
             }
+            const group = new THREE.Group();
+            stairsGroup = group;
+            const MAX_STEPS = 12;
+            const MIN_DH = 0.12; // minimum height difference to bother with stairs
+            const MAX_DH = 3.5; // maximum supported difference for auto stairs
+            const STEP_RUN = 0.18; // horizontal depth per step
+            const MAX_SPAN = 0.9; // do not extend beyond tile bounds
+            const material = new THREE.MeshStandardMaterial({ color: 0xcfd3d6, roughness: 0.95, metalness: 0.0 });
+            const dirs = [
+                { dx: 1, dy: 0 },
+                { dx: -1, dy: 0 },
+                { dx: 0, dy: 1 },
+                { dx: 0, dy: -1 },
+            ];
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const el = currentGameMap[y][x];
+                    const props = colorMapping_4.getElementProperties(el);
+                    if (!props.walkable)
+                        continue;
+                    const h0 = terrain_1.sampleHeightBilinear(heightMap, x + 0.5, y + 0.5);
+                    for (const d of dirs) {
+                        const nx = x + d.dx;
+                        const ny = y + d.dy;
+                        if (ny < 0 || ny >= height || nx < 0 || nx >= width)
+                            continue;
+                        const elN = currentGameMap[ny][nx];
+                        const pN = colorMapping_4.getElementProperties(elN);
+                        if (!pN.walkable)
+                            continue;
+                        const h1 = terrain_1.sampleHeightBilinear(heightMap, nx + 0.5, ny + 0.5);
+                        const dh = h1 - h0;
+                        const absDh = Math.abs(dh);
+                        // Only build stairs when at least one tile is explicitly a STAIRS tile
+                        if (!(currentGameMap[y][x] === colorMapping_4.GameElement.STAIRS || currentGameMap[ny][nx] === colorMapping_4.GameElement.STAIRS))
+                            continue;
+                        if (absDh < MIN_DH || absDh > MAX_DH)
+                            continue;
+                        // Build a ramp of steps from lower to higher tile along the direction
+                        const steps = Math.min(MAX_STEPS, Math.max(1, Math.ceil(absDh / 0.22)));
+                        const actualRise = dh / steps; // signed per-step rise
+                        const run = Math.min(MAX_SPAN, steps * STEP_RUN);
+                        const stepDepth = run / steps;
+                        for (let s = 0; s < steps; s++) {
+                            const t0 = (s / steps) * run;
+                            const t1 = ((s + 1) / steps) * run;
+                            const w = 0.8; // width of stairs slab
+                            const slabH = 0.03; // thickness of each step slab
+                            const geo = new THREE.BoxGeometry(d.dy === 0 ? stepDepth : w, slabH, d.dx === 0 ? stepDepth : w);
+                            const mesh = new THREE.Mesh(geo, material);
+                            // Center start within the tile, extend towards neighbor
+                            const cx = x + 0.5 + (d.dx * (t0 + stepDepth * 0.5));
+                            const cy = y + 0.5 + (d.dy * (t0 + stepDepth * 0.5));
+                            // Vertical placement interpolates along steps
+                            const baseH = h0 + actualRise * (s + 1); // top surface height for this step
+                            mesh.position.set(cx, baseH + slabH * 0.5 + 0.005, cy);
+                            mesh.castShadow = true;
+                            mesh.receiveShadow = true;
+                            group.add(mesh);
+                        }
+                    }
+                }
+            }
+            scene.add(group);
         }
         function getWallTexture(element) {
             let texturePath;
@@ -3455,7 +3804,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     alphaTest: 0.05
                 });
                 const sprite = new THREE.Sprite(spriteMaterial);
-                sprite.position.set(x, 0.9, y);
+                const gh = terrain_1.sampleHeightBilinear(heightMap, x, y);
+                sprite.position.set(x, gh + 0.9, y);
                 sprite.scale.set(0.6, 0.6, 0.6);
                 scene.add(sprite);
                 // Add emissive glow for certain elements
@@ -3476,7 +3826,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     glow.scale.set(0.9, 0.9, 0.9);
                     glow.pulse = true;
                     scene.add(glow);
-                    glowSprites.push(glow);
+                    // glow disabled
                 }
                 // For environment tiles, prefer custom ground visuals only (no hovering icons)
                 if (element === colorMapping_4.GameElement.GRASS || element === colorMapping_4.GameElement.WATER || element === colorMapping_4.GameElement.DANGER || element === colorMapping_4.GameElement.FIRE) {
@@ -3498,15 +3848,26 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             }
         }
         function createColoredQuad(x, y, element) {
-            // Artistic ground tiles for grass/water
-            const size = 0.96;
-            const base = new THREE.PlaneGeometry(size, size, 1, 1);
+            // Conforming ground tiles subdivided to enhance continuity between tiles
+            const size = 1.0;
+            const segments = 2; // break one tile into 4 subtiles
+            const geom = new THREE.PlaneGeometry(size, size, segments, segments);
+            const pos = geom.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const lx = pos.getX(i); // local -0.5..0.5
+                const ly = pos.getY(i);
+                const wx = x + lx;
+                const wy = y + ly;
+                const h = terrain_1.sampleHeightBilinear(heightMap, wx, wy);
+                pos.setZ(i, h);
+            }
+            pos.needsUpdate = true;
+            geom.computeVertexNormals();
             const color = getElementColor(element);
-            const baseMat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0.0, transparent: true, opacity: 0.9, side: THREE.DoubleSide, fog: true });
-            const tile = new THREE.Mesh(base, baseMat);
-            const groundH = terrain_1.sampleHeightBilinear(heightMap, x, y);
-            tile.position.set(x, groundH + 0.01, y);
+            const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.93, metalness: 0.0, transparent: true, opacity: 0.92, side: THREE.DoubleSide, fog: true });
+            const tile = new THREE.Mesh(geom, mat);
             tile.rotation.x = -Math.PI / 2;
+            tile.position.set(x, 0.0, y);
             tile.receiveShadow = true;
             scene.add(tile);
             if (element === colorMapping_4.GameElement.GRASS) {
@@ -3518,7 +3879,8 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     tex.generateMipmaps = false;
                     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true, alphaTest: 0.05 });
                     const s = new THREE.Sprite(mat);
-                    s.position.set(x + (Math.random() - 0.5) * 0.5, groundH + 0.12, y + (Math.random() - 0.5) * 0.5);
+                    const gh = terrain_1.sampleHeightBilinear(heightMap, x, y);
+                    s.position.set(x + (Math.random() - 0.5) * 0.5, gh + 0.12, y + (Math.random() - 0.5) * 0.5);
                     s.scale.set(0.35, 0.35, 1);
                     s.swayPhase = Math.random() * Math.PI * 2;
                     s.castShadow = true;
@@ -3527,15 +3889,26 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 }
             }
             else if (element === colorMapping_4.GameElement.WATER) {
-                // Add shimmered water surface using simple shader
-                const waterGeo = new THREE.PlaneGeometry(size, size, 16, 16);
+                // Water surface that conforms loosely to terrain with slight offset
+                const waterGeo = new THREE.PlaneGeometry(size, size, 4, 4);
+                const wp = waterGeo.attributes.position;
+                for (let i = 0; i < wp.count; i++) {
+                    const lx = wp.getX(i);
+                    const ly = wp.getY(i);
+                    const wx = x + lx;
+                    const wy = y + ly;
+                    const h = terrain_1.sampleHeightBilinear(heightMap, wx, wy) + 0.03;
+                    wp.setZ(i, h);
+                }
+                wp.needsUpdate = true;
+                waterGeo.computeVertexNormals();
                 const waterMat = new THREE.ShaderMaterial({
                     uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0x4aa3ff) } },
                     vertexShader: `
           uniform float time;
           void main() {
             vec3 p = position;
-            p.z += sin((position.x + position.y) * 6.0 + time * 2.0) * 0.02;
+            p.z += sin((position.x + position.y) * 6.0 + time * 2.0) * 0.015;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
           }
         `,
@@ -3550,7 +3923,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 });
                 const water = new THREE.Mesh(waterGeo, waterMat);
                 water.rotation.x = -Math.PI / 2;
-                water.position.set(x, groundH + 0.03, y);
+                water.position.set(x, 0.0, y);
                 water.receiveShadow = true; // catch soft caustic shadows from scene lights
                 scene.add(water);
                 waterMaterials.push(waterMat);
@@ -3558,219 +3931,59 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 if (terrain_1.isWaterEdge(currentGameMap, Math.floor(x), Math.floor(y))) {
                     const foam = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.48, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
                     foam.rotation.x = -Math.PI / 2;
-                    foam.position.set(x, groundH + 0.035, y);
+                    const gh = terrain_1.sampleHeightBilinear(heightMap, x, y);
+                    foam.position.set(x, gh + 0.035, y);
                     foam.renderOrder = 3;
                     scene.add(foam);
                     foamMeshes.push(foam);
                 }
             }
         }
-        function createParticleEffects() {
-            // Clear existing particle systems
-            particleSystems.forEach(systems => {
-                systems.forEach(system => scene.remove(system));
-            });
-            particleSystems.clear();
-            // Clear transient splashes
-            transientSplashSystems.forEach(sys => scene.remove(sys));
-            transientSplashSystems = [];
+        function createFireLightsForMap() {
             // Clear existing fire lights
             fireLights.forEach(light => scene.remove(light));
             fireLights = [];
-            // Create particle effects for each element type
             for (let y = 0; y < currentGameMap.length; y++) {
                 for (let x = 0; x < currentGameMap[y].length; x++) {
                     const element = currentGameMap[y][x];
-                    const properties = colorMapping_4.getElementProperties(element);
-                    // Only create particles for non-wall elements that need atmosphere
-                    if (element !== colorMapping_4.GameElement.WALL && element !== colorMapping_4.GameElement.FLOOR) {
-                        createParticlesForElement(x, y, element);
-                    }
-                    // Add fire lights
                     if (element === colorMapping_4.GameElement.FIRE) {
                         createFireLight(x, y);
                     }
                 }
             }
         }
-        function createParticlesForElement(x, y, element) {
-            const particleConfig = getParticleConfig(element);
-            if (!particleConfig)
-                return;
-            const { count, color, size, speed, spread } = particleConfig;
-            // Create particle geometry
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(count * 3);
-            const colors = new Float32Array(count * 3);
-            const sizes = new Float32Array(count);
-            // Initialize particles in a small area around the element
-            for (let i = 0; i < count; i++) {
-                const i3 = i * 3;
-                // Random position within spread area
-                positions[i3] = x + (Math.random() - 0.5) * spread;
-                positions[i3 + 1] = 0.5 + Math.random() * 0.5; // Above ground
-                positions[i3 + 2] = y + (Math.random() - 0.5) * spread;
-                // Set color
-                colors[i3] = ((color >> 16) & 255) / 255;
-                colors[i3 + 1] = ((color >> 8) & 255) / 255;
-                colors[i3 + 2] = (color & 255) / 255;
-                // Set size
-                sizes[i] = size * (0.5 + Math.random() * 0.5);
-            }
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-            // Create material for billboard particles
-            const material = new THREE.ShaderMaterial({
-                uniforms: {
-                    time: { value: 0 },
-                    pixelRatio: { value: window.devicePixelRatio }
-                },
-                vertexShader: `
-        attribute float size;
-        attribute vec3 color;
-        varying vec3 vColor;
-        varying float vSize;
-        uniform float time;
-        uniform float pixelRatio;
-
-        void main() {
-          vColor = color;
-          vSize = size;
-
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_Position = projectionMatrix * mvPosition;
-          float computedSize = size * pixelRatio * (300.0 / max(0.1, -mvPosition.z));
-          gl_PointSize = min(computedSize, 64.0);
-        }
-      `,
-                fragmentShader: `
-        varying vec3 vColor;
-        varying float vSize;
-
-        void main() {
-          float distance = length(gl_PointCoord - vec2(0.5));
-          if (distance > 0.5) discard;
-
-          // Soft circular particles
-          float alpha = 1.0 - smoothstep(0.0, 0.5, distance);
-          gl_FragColor = vec4(vColor, alpha * 0.6);
-        }
-      `,
-                transparent: true,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            });
-            const particleSystem = new THREE.Points(geometry, material);
-            particleSystem.userData = { element, x, y, speed, originalPositions: positions.slice() };
-            scene.add(particleSystem);
-            // Add to particle systems map
-            if (!particleSystems.has(element)) {
-                particleSystems.set(element, []);
-            }
-            particleSystems.get(element).push(particleSystem);
-        }
-        function getParticleConfig(element) {
-            switch (element) {
-                case colorMapping_4.GameElement.WATER:
-                    return {
-                        count: 8,
-                        color: 0x4488ff, // Light blue
-                        size: 3,
-                        speed: 0.5,
-                        spread: 0.6
-                    };
-                case colorMapping_4.GameElement.GRASS:
-                    return {
-                        count: 6,
-                        color: 0x22aa44, // Green
-                        size: 2,
-                        speed: 0.3,
-                        spread: 0.8
-                    };
-                case colorMapping_4.GameElement.FIRE:
-                    return {
-                        count: 12,
-                        color: 0xff6600, // Orange
-                        size: 4,
-                        speed: 1.5,
-                        spread: 0.4
-                    };
-                case colorMapping_4.GameElement.DANGER:
-                    return {
-                        count: 10,
-                        color: 0xff0044, // Red
-                        size: 3,
-                        speed: 1.0,
-                        spread: 0.7
-                    };
-                case colorMapping_4.GameElement.PLAYER_START:
-                    return null; // Disable particles at player start to avoid huge near-camera points
-                default:
-                    return null;
-            }
-        }
+        // Particles removed
+        // No particle config needed
         function createFireLight(x, y) {
             const fireLight = new THREE.PointLight(0xffaa44, 1.1, 8);
-            fireLight.position.set(x, 0.8, y);
+            const gh = terrain_1.sampleHeightBilinear(heightMap, x, y);
+            fireLight.position.set(x, gh + 0.8, y);
             fireLight.castShadow = false; // Don't cast shadows to avoid performance issues
             scene.add(fireLight);
             fireLights.push(fireLight);
         }
-        function updateParticleEffects() {
+        // Update fire light flicker and animated materials
+        function updateSceneEffects() {
             const time = Date.now() * 0.001;
-            particleSystems.forEach((systems, element) => {
-                systems.forEach(system => {
-                    const material = system.material;
-                    material.uniforms.time.value = time;
-                    // Animate particles based on their type
-                    const positions = system.geometry.attributes.position.array;
-                    const originalPositions = system.userData.originalPositions;
-                    const speed = system.userData.speed;
-                    for (let i = 0; i < positions.length; i += 3) {
-                        // Gentle floating motion
-                        positions[i + 1] = originalPositions[i + 1] + Math.sin(time * speed + i * 0.1) * 0.1;
-                        // For fire particles, add more chaotic motion
-                        if (element === colorMapping_4.GameElement.FIRE) {
-                            positions[i] = originalPositions[i] + Math.sin(time * speed * 2 + i * 0.2) * 0.05;
-                            positions[i + 2] = originalPositions[i + 2] + Math.cos(time * speed * 1.5 + i * 0.15) * 0.05;
-                        }
-                    }
-                    system.geometry.attributes.position.needsUpdate = true;
-                });
-            });
-            // Animate fire lights with flickering
             fireLights.forEach((light, index) => {
                 const baseIntensity = 0.8;
                 const flicker = Math.sin(time * 8 + index) * 0.2 + Math.sin(time * 12 + index * 2) * 0.1;
                 light.intensity = baseIntensity + flicker;
             });
-            // Update water shader time
             waterMaterials.forEach((mat) => {
                 if (mat.uniforms && mat.uniforms.time) {
                     mat.uniforms.time.value = time;
                 }
             });
-            // Grass sway
             grassSwaySprites.forEach((s, idx) => {
                 const phase = s.swayPhase || 0;
                 s.rotation.z = Math.sin(time * 2.0 + phase) * 0.08;
             });
-            // Animate foam opacity
             foamMeshes.forEach((m, idx) => {
                 const mat = m.material;
                 if (mat && mat.opacity !== undefined) {
                     mat.opacity = 0.45 + Math.sin(time * 2.5 + idx) * 0.1;
                 }
-            });
-            // Remove expired splash systems
-            transientSplashSystems = transientSplashSystems.filter((sys) => {
-                sys.userData.life -= 0.016;
-                if (sys.userData.life <= 0) {
-                    scene.remove(sys);
-                    return false;
-                }
-                return true;
             });
         }
         function getElementColor(element) {
@@ -3923,7 +4136,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             camera.position.set(player.x, baseEye + swimBob, player.y);
             const lookX = player.x + Math.cos(player.angle) * 2;
             const lookZ = player.y + Math.sin(player.angle) * 2;
-            camera.lookAt(lookX, 1, lookZ);
+            camera.lookAt(lookX, groundH + 1, lookZ);
             // Update player torch position and add subtle flicker
             if (scene.playerTorch) {
                 const torch = scene.playerTorch;
@@ -3931,67 +4144,10 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                 const t = Date.now() * 0.002;
                 torch.intensity = 2.0 + Math.sin(t * 3.2) * 0.2 + Math.sin(t * 5.7) * 0.1;
             }
-            // Detect water enter/exit for splashes
-            if (inWater && !lastInWater) {
-                spawnWaterSplash(player.x, player.y);
-                playSplashSound();
-            }
-            lastInWater = inWater;
-            // Landing dust puff when quick stop on floor (cooldown to avoid spam)
-            landingCooldown = Math.max(0, landingCooldown - 0.016);
-            const speed = Math.hypot(player.x - prevX, player.y - prevY);
-            if (!inWater && speed < 0.0005 && landingCooldown <= 0 && (keysPressed.has('keys') || keysPressed.has('arrowdown'))) {
-                spawnDustPuff(player.x, player.y);
-                landingCooldown = 0.4;
-            }
+            // Particle-based splashes and dust removed
         }
-        function spawnWaterSplash(x, y) {
-            const count = 20;
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(count * 3);
-            const colors = new Float32Array(count * 3);
-            for (let i = 0; i < count; i++) {
-                const a = Math.random() * Math.PI * 2;
-                const r = Math.random() * 0.35;
-                positions[i * 3] = x + Math.cos(a) * r;
-                positions[i * 3 + 1] = 0.1 + Math.random() * 0.2;
-                positions[i * 3 + 2] = y + Math.sin(a) * r;
-                colors[i * 3] = 0.4;
-                colors[i * 3 + 1] = 0.7;
-                colors[i * 3 + 2] = 1.0;
-            }
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            const material = new THREE.PointsMaterial({ size: 0.08, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false });
-            const points = new THREE.Points(geometry, material);
-            points.userData.life = 0.5; // seconds
-            scene.add(points);
-            transientSplashSystems.push(points);
-        }
-        function spawnDustPuff(x, y) {
-            const count = 14;
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(count * 3);
-            const colors = new Float32Array(count * 3);
-            for (let i = 0; i < count; i++) {
-                const a = Math.random() * Math.PI * 2;
-                const r = Math.random() * 0.25;
-                positions[i * 3] = x + Math.cos(a) * r;
-                positions[i * 3 + 1] = 0.05 + Math.random() * 0.1;
-                positions[i * 3 + 2] = y + Math.sin(a) * r;
-                const c = 0.7 + Math.random() * 0.2;
-                colors[i * 3] = c;
-                colors[i * 3 + 1] = c;
-                colors[i * 3 + 2] = c;
-            }
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            const material = new THREE.PointsMaterial({ size: 0.07, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false });
-            const points = new THREE.Points(geometry, material);
-            points.userData.life = 0.35;
-            scene.add(points);
-            transientSplashSystems.push(points);
-        }
+        // Particle splash removed
+        // Dust puff removed
         // Simple WebAudio splash synth
         function playSplashSound() {
             try {
@@ -4025,6 +4181,10 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     console.log(`❌ OUT OF BOUNDS: Position (${x.toFixed(3)}, ${y.toFixed(3)}) outside map bounds`);
                 }
                 return false;
+            }
+            // If walls are disabled, only enforce bounds
+            if (DISABLE_WALLS) {
+                return true;
             }
             // Use comprehensive collision points for reliable wall detection
             // Points are arranged in a circle plus diagonals for better coverage
@@ -4102,30 +4262,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             return true;
         }
         // Exposed hook to trigger enemy hit sparks (call externally when an enemy is damaged)
-        window.spawnHitSparks = function (worldX, worldY) {
-            const count = 16;
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(count * 3);
-            const colors = new Float32Array(count * 3);
-            for (let i = 0; i < count; i++) {
-                const a = Math.random() * Math.PI * 2;
-                const r = Math.random() * 0.25;
-                positions[i * 3] = worldX + Math.cos(a) * r;
-                positions[i * 3 + 1] = 1.0 + Math.random() * 0.2;
-                positions[i * 3 + 2] = worldY + Math.sin(a) * r;
-                colors[i * 3] = 1.0;
-                colors[i * 3 + 1] = 0.8;
-                colors[i * 3 + 2] = 0.2;
-            }
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            const material = new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
-            const points = new THREE.Points(geometry, material);
-            points.life = 0.35;
-            scene.add(points);
-            // Let update loop fade it out
-            transientSplashSystems.push(points);
-        };
+        window.spawnHitSparks = function (worldX, worldY) { };
         function trySlideAlongWalls(targetX, targetY) {
             const currentX = player.x;
             const currentY = player.y;
@@ -4307,7 +4444,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
             drawMinimap();
             updateDebugVisualization();
             updateSpriteAnimations();
-            updateParticleEffects();
+            updateSceneEffects();
             if (usePostprocessing && postRenderTarget && postMaterial) {
                 // Render to low-res target, then upscale with post shader
                 renderer.setRenderTarget(postRenderTarget);
@@ -4481,8 +4618,7 @@ System.register("components/threeJSDungeonCrawler", ["colorMapping", "components
                     child.position.y = originalY + Math.sin(time * frequency) * amplitude;
                 }
             });
-            // Pulse glow sprites
-            glowSprites.forEach((s, idx) => { });
+            // Glow sprites removed
             // Glint shimmer
             glintSprites.forEach((s, idx) => {
                 const base = 0.8 + Math.sin(time * 3.0 + s.phase) * 0.2;
@@ -4706,11 +4842,15 @@ System.register("components/imageUploader", ["getImageData", "util", "components
             clear: () => {
                 // Clear the file input
                 fileInput.value = '';
+                heightFileInput.value = '';
                 // Clear the preview
                 previewImage.src = '';
                 previewImage.style.display = 'none';
+                heightPreviewImage.src = '';
+                heightPreviewImage.style.display = 'none';
                 // Clear stored image data
                 currentImageData = null;
+                currentHeightmap = null;
                 // Disable the use button
                 useImageButton.disabled = true;
                 // Clear any status message
@@ -4720,11 +4860,16 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         };
         // Current uploaded image data
         let currentImageData = null;
+        let currentHeightmap = null;
         // Create UI elements
         const fileInput = document.createElement("input");
         fileInput.type = "file";
         fileInput.accept = "image/*";
         fileInput.style.marginBottom = "10px";
+        const heightFileInput = document.createElement("input");
+        heightFileInput.type = "file";
+        heightFileInput.accept = "image/*";
+        heightFileInput.style.marginBottom = "10px";
         const previewImage = document.createElement("img");
         previewImage.className = "uploadPreview";
         previewImage.style.display = "none";
@@ -4732,6 +4877,13 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         previewImage.style.maxHeight = "300px";
         previewImage.style.border = "1px solid #ccc";
         previewImage.style.marginTop = "10px";
+        const heightPreviewImage = document.createElement("img");
+        heightPreviewImage.className = "uploadPreview";
+        heightPreviewImage.style.display = "none";
+        heightPreviewImage.style.maxWidth = "300px";
+        heightPreviewImage.style.maxHeight = "300px";
+        heightPreviewImage.style.border = "1px solid #ccc";
+        heightPreviewImage.style.marginTop = "10px";
         const statusMessage = document.createElement("p");
         statusMessage.style.display = "none";
         statusMessage.style.marginTop = "10px";
@@ -4744,7 +4896,9 @@ System.register("components/imageUploader", ["getImageData", "util", "components
         useImageButton.style.marginTop = "10px";
         useImageButton.onclick = () => {
             if (currentImageData && component.onUploadComplete) {
-                component.onUploadComplete(currentImageData);
+                const payload = currentImageData;
+                payload.__heightmap = currentHeightmap || null;
+                component.onUploadComplete(payload);
             }
         };
         const clearButton = document.createElement("input");
@@ -4798,6 +4952,38 @@ System.register("components/imageUploader", ["getImageData", "util", "components
                 showStatusMessage('Error loading image. Please try a different file.', 'error');
             }
         };
+        heightFileInput.onchange = async () => {
+            if (!heightFileInput.files || heightFileInput.files.length === 0)
+                return;
+            const file = heightFileInput.files[0];
+            if (!file.type.startsWith('image/')) {
+                showStatusMessage('Please select a valid heightmap image file.', 'error');
+                return;
+            }
+            const maxSize = 10 * 1024 * 1024;
+            if (file.size > maxSize) {
+                showStatusMessage('Heightmap too large. < 10MB please.', 'error');
+                return;
+            }
+            try {
+                const objectUrl = URL.createObjectURL(file);
+                const imageData = await getImageData_2.default(objectUrl);
+                if (currentImageData && (imageData.width !== currentImageData.width || imageData.height !== currentImageData.height)) {
+                    showStatusMessage('Heightmap size must match the main map size.', 'error');
+                    URL.revokeObjectURL(objectUrl);
+                    return;
+                }
+                currentHeightmap = imageData;
+                heightPreviewImage.src = objectUrl;
+                heightPreviewImage.style.display = '';
+                showStatusMessage(`Heightmap loaded: ${imageData.width}x${imageData.height}`, 'success');
+                heightPreviewImage.onload = () => URL.revokeObjectURL(objectUrl);
+            }
+            catch (e) {
+                console.error(e);
+                showStatusMessage('Error loading heightmap image.', 'error');
+            }
+        };
         function showStatusMessage(message, type) {
             statusMessage.textContent = message;
             statusMessage.style.display = 'block';
@@ -4834,8 +5020,14 @@ System.register("components/imageUploader", ["getImageData", "util", "components
                     "Select Image File: ", fileInput
                 ]
             ],
+            common_5.inputGroup(), [
+                document.createElement("label"), [
+                    "Optional Heightmap: ", heightFileInput
+                ]
+            ],
             statusMessage,
             previewImage,
+            heightPreviewImage,
             common_5.inputGroup(), [
                 useImageButton,
                 clearButton
@@ -4952,9 +5144,9 @@ System.register("components/assetManager", ["gameSettings"], function (exports_2
         }
     };
 });
-System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/settingsPanel", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "components/assetManager", "colorMapping"], function (exports_27, context_27) {
+System.register("main", ["wfc/run", "util", "components/wfcOptions", "components/settingsPanel", "gameSettings", "components/presetPicker", "components/drawingCanvas", "components/imageEditor", "components/threeJSDungeonCrawler", "components/imageUploader", "components/assetManager", "colorMapping"], function (exports_27, context_27) {
     "use strict";
-    var run_1, util_7, wfcOptions_1, settingsPanel_1, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, assetManager_1, colorMapping_5, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, settingsPanel, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
+    var run_1, util_7, wfcOptions_1, settingsPanel_1, gameSettings_4, presetPicker_1, drawingCanvas_1, imageEditor_1, threeJSDungeonCrawler_1, imageUploader_1, assetManager_1, colorMapping_5, wfc, AppMode, currentMode, generatedImageData, gameMap, canvas, wfcOptions, inputBitmap, downloadButton, editImageButton, startWFC, modeTabContainer, inputModeTab, wfcModeTab, editModeTab, gameModeTab, contentContainer, settingsPanel, inputTabContainer, presetTab, drawTab, uploadTab, inputContainer, presetPicker, drawingCanvas, imageUploader, imageEditor, dungeonCrawler, mainElem;
     var __moduleName = context_27 && context_27.id;
     // Tab switching logic for input tabs
     function switchInputTab(activeTab, inactiveTabs, showElement) {
@@ -5076,6 +5268,115 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             return;
         // Convert image to game map
         gameMap = colorMapping_5.imageDataToGameMap(generatedImageData);
+        // Derive height map in meters based on settings
+        const s = gameSettings_4.getSettings();
+        const payload = generatedImageData;
+        const customHeight = payload.__heightmap;
+        const { heights, lightnesses } = colorMapping_5.extractHslMaps(customHeight || generatedImageData);
+        let heightOverride = heights;
+        if (s.heightMode === 'procedural') {
+            const h = generatedImageData.height;
+            const w = generatedImageData.width;
+            const freq = s.heightNoiseFrequency;
+            const oct = s.heightNoiseOctaves;
+            const scale = s.heightScaleMeters;
+            const base = s.heightBaseMeters;
+            const seed = s.heightSeed;
+            const proc = generateProceduralHeightMap(w, h, { frequency: freq, octaves: oct, seed });
+            // normalize 0..1 then scale
+            let min = 1e9, max = -1e9;
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const v = proc[y][x];
+                    if (v < min)
+                        min = v;
+                    if (v > max)
+                        max = v;
+                }
+            }
+            const range = Math.max(1e-6, max - min);
+            heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const n = (proc[y][x] - min) / range; // 0..1
+                    heightOverride[y][x] = base + n * scale;
+                }
+            }
+            // Optional smoothing
+            for (let p = 0; p < s.heightSmoothingPasses; p++) {
+                heightOverride = s.heightBlurType === 'gaussian' ? gaussianBlurHeight(heightOverride, s.heightBlurRadius) : blurHeight(heightOverride, s.heightBlurRadius);
+            }
+            // Slope limiting and relaxation
+            heightOverride = limitSlope(heightOverride, s.heightMaxSlopePerTile, s.heightRelaxPasses);
+        }
+        else if (customHeight) {
+            // If a custom heightmap was provided, use its lightness with scale/base; optionally quantize
+            const scale = s.heightScaleMeters;
+            const base = s.heightBaseMeters;
+            const h = customHeight.height;
+            const w = customHeight.width;
+            heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+            if (s.heightMode === 'quantized') {
+                const levels = Math.max(2, Math.floor(s.heightLevels));
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        const l = lightnesses[y][x];
+                        const idx = Math.round(l * (levels - 1));
+                        const q = idx / (levels - 1);
+                        heightOverride[y][x] = base + q * scale;
+                    }
+                }
+            }
+            else {
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        const l = lightnesses[y][x];
+                        heightOverride[y][x] = base + l * scale;
+                    }
+                }
+            }
+            // Smooth even with heightmap
+            for (let p = 0; p < s.heightSmoothingPasses; p++) {
+                heightOverride = s.heightBlurType === 'gaussian' ? gaussianBlurHeight(heightOverride, s.heightBlurRadius) : blurHeight(heightOverride, s.heightBlurRadius);
+            }
+            heightOverride = limitSlope(heightOverride, s.heightMaxSlopePerTile, s.heightRelaxPasses);
+        }
+        else if (s.heightMode === 'quantized') {
+            const levels = Math.max(2, Math.floor(s.heightLevels));
+            const scale = s.heightScaleMeters;
+            const base = s.heightBaseMeters;
+            const h = generatedImageData.height;
+            const w = generatedImageData.width;
+            heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const l = lightnesses[y][x]; // 0..1
+                    const idx = Math.round(l * (levels - 1));
+                    const q = idx / (levels - 1);
+                    heightOverride[y][x] = base + q * scale;
+                }
+            }
+        }
+        else if (s.heightMode === 'lightness') {
+            const scale = s.heightScaleMeters;
+            const base = s.heightBaseMeters;
+            const h = generatedImageData.height;
+            const w = generatedImageData.width;
+            heightOverride = Array.from({ length: h }, (_, y) => new Array(w).fill(0));
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const l = lightnesses[y][x];
+                    heightOverride[y][x] = base + l * scale;
+                }
+            }
+        }
+        // Final smoothing for non-procedural modes
+        if (s.heightMode !== 'procedural') {
+            for (let p = 0; p < s.heightSmoothingPasses; p++) {
+                heightOverride = s.heightBlurType === 'gaussian' ? gaussianBlurHeight(heightOverride, s.heightBlurRadius) : blurHeight(heightOverride, s.heightBlurRadius);
+            }
+            heightOverride = limitSlope(heightOverride, s.heightMaxSlopePerTile, s.heightRelaxPasses);
+        }
         // Find player start position
         const playerStart = colorMapping_5.findPlayerStart(gameMap);
         if (!playerStart) {
@@ -5092,11 +5393,167 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
         }
         // Start the game
         try {
-            await dungeonCrawler.startGame(gameMap, playerStart);
+            await dungeonCrawler.startGame(gameMap, playerStart, heightOverride);
         }
         catch (error) {
             console.error('Failed to start game:', error);
         }
+    }
+    function generateProceduralHeightMap(width, height, opts) {
+        // Simple fractal noise using the same noise from terrain.ts style
+        const { frequency, octaves, seed } = opts;
+        const rnd = mulberry32(seed);
+        const noise2 = valueNoise2D(seed);
+        const map = Array.from({ length: height }, () => new Array(width).fill(0));
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                let amp = 1.0;
+                let freq = frequency;
+                let val = 0;
+                let norm = 0;
+                for (let o = 0; o < octaves; o++) {
+                    val += noise2(x * 0.05 * freq, y * 0.05 * freq) * amp;
+                    norm += amp;
+                    amp *= 0.5;
+                    freq *= 2.0;
+                }
+                map[y][x] = val / Math.max(1e-6, norm);
+            }
+        }
+        return map;
+    }
+    function valueNoise2D(seed) {
+        const rand = mulberry32(seed);
+        const grid = new Map();
+        function rnd(ix, iy) {
+            const key = ix + ',' + iy;
+            if (!grid.has(key))
+                grid.set(key, rand());
+            return grid.get(key);
+        }
+        function lerp(a, b, t) { return a + (b - a) * t; }
+        function smoothstep(t) { return t * t * (3 - 2 * t); }
+        return (x, y) => {
+            const x0 = Math.floor(x), y0 = Math.floor(y);
+            const tx = x - x0, ty = y - y0;
+            const v00 = rnd(x0, y0);
+            const v10 = rnd(x0 + 1, y0);
+            const v01 = rnd(x0, y0 + 1);
+            const v11 = rnd(x0 + 1, y0 + 1);
+            const u = smoothstep(tx), v = smoothstep(ty);
+            const a = lerp(v00, v10, u);
+            const b = lerp(v01, v11, u);
+            return lerp(a, b, v) * 2 - 1; // -1..1
+        };
+    }
+    function mulberry32(a) {
+        return function () {
+            let t = a += 0x6D2B79F5;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+    function blurHeight(hm, radius) {
+        if (radius <= 0)
+            return hm;
+        const rows = hm.length, cols = hm[0].length;
+        const out = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        const r = Math.max(1, radius);
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                let sum = 0, count = 0;
+                for (let dy = -r; dy <= r; dy++) {
+                    for (let dx = -r; dx <= r; dx++) {
+                        const nx = x + dx, ny = y + dy;
+                        if (ny >= 0 && ny < rows && nx >= 0 && nx < cols) {
+                            sum += hm[ny][nx];
+                            count++;
+                        }
+                    }
+                }
+                out[y][x] = sum / Math.max(1, count);
+            }
+        }
+        return out;
+    }
+    function gaussianKernel1D(radius) {
+        const r = Math.max(1, radius);
+        const sigma = r / 1.5;
+        const k = [];
+        let sum = 0;
+        for (let i = -r; i <= r; i++) {
+            const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+            k.push(v);
+            sum += v;
+        }
+        return k.map(v => v / sum);
+    }
+    function gaussianBlurHeight(hm, radius) {
+        if (radius <= 0)
+            return hm;
+        const rows = hm.length, cols = hm[0].length;
+        const kr = Math.max(1, radius);
+        const kernel = gaussianKernel1D(kr);
+        // horizontal pass
+        const temp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                let sum = 0;
+                for (let i = -kr; i <= kr; i++) {
+                    const nx = Math.min(cols - 1, Math.max(0, x + i));
+                    sum += hm[y][nx] * kernel[i + kr];
+                }
+                temp[y][x] = sum;
+            }
+        }
+        // vertical pass
+        const out = Array.from({ length: rows }, () => new Array(cols).fill(0));
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                let sum = 0;
+                for (let i = -kr; i <= kr; i++) {
+                    const ny = Math.min(rows - 1, Math.max(0, y + i));
+                    sum += temp[ny][x] * kernel[i + kr];
+                }
+                out[y][x] = sum;
+            }
+        }
+        return out;
+    }
+    function limitSlope(hm, maxSlopePerTile, relaxPasses) {
+        if (maxSlopePerTile <= 0)
+            return hm;
+        const rows = hm.length, cols = hm[0].length;
+        const out = hm.map(row => row.slice());
+        for (let p = 0; p < Math.max(0, relaxPasses); p++) {
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const h0 = out[y][x];
+                    let sum = h0, cnt = 1;
+                    // 4-neighborhood
+                    const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                    for (const [dx, dy] of nb) {
+                        const nx = x + dx, ny = y + dy;
+                        if (ny < 0 || ny >= rows || nx < 0 || nx >= cols)
+                            continue;
+                        const hN = out[ny][nx];
+                        const diff = hN - h0;
+                        if (Math.abs(diff) > maxSlopePerTile) {
+                            const clamped = h0 + Math.sign(diff) * maxSlopePerTile;
+                            sum += clamped;
+                            cnt++;
+                        }
+                        else {
+                            sum += hN;
+                            cnt++;
+                        }
+                    }
+                    out[y][x] = sum / cnt;
+                }
+            }
+        }
+        return out;
     }
     return {
         setters: [
@@ -5111,6 +5568,9 @@ System.register("main", ["wfc/run", "util", "components/wfcOptions", "components
             },
             function (settingsPanel_1_1) {
                 settingsPanel_1 = settingsPanel_1_1;
+            },
+            function (gameSettings_4_1) {
+                gameSettings_4 = gameSettings_4_1;
             },
             function (presetPicker_1_1) {
                 presetPicker_1 = presetPicker_1_1;

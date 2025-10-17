@@ -45,6 +45,12 @@ export interface RGBColor {
   b: number;
 }
 
+export interface HSLColor {
+  h: number; // 0..360
+  s: number; // 0..1
+  l: number; // 0..1
+}
+
 export function hexToRgb(hex: string): RGBColor | null {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   return result ? {
@@ -56,6 +62,35 @@ export function hexToRgb(hex: string): RGBColor | null {
 
 export function rgbToHex(r: number, g: number, b: number): string {
   return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+export function rgbToHsl(r: number, g: number, b: number): HSLColor {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d !== 0) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn:
+        h = (gn - bn) / d + (gn < bn ? 6 : 0);
+        break;
+      case gn:
+        h = (bn - rn) / d + 2;
+        break;
+      default:
+        h = (rn - gn) / d + 4;
+    }
+    h *= 60;
+  } else {
+    h = 0; s = 0;
+  }
+  return { h, s, l };
 }
 
 export function colorDistance(color1: RGBColor, color2: RGBColor): number {
@@ -102,13 +137,74 @@ export function imageDataToGameMap(
       const g = data[index + 1];
       const b = data[index + 2];
 
-      const element = findClosestColor(r, g, b, mappings);
+      // First try exact palette match; if not close, classify by hue
+      let element = findClosestColor(r, g, b, mappings);
+      // If it matched to FLOOR and the color isn't exactly white, use hue to classify
+      const hex = rgbToHex(r, g, b).toUpperCase();
+      const isExactMapped = mappings[hex as keyof ColorMapping] !== undefined;
+      if (!isExactMapped) {
+        const hsl = rgbToHsl(r, g, b);
+        element = classifyElementByHue(hsl);
+      }
       row.push(element);
     }
     gameMap.push(row);
   }
 
   return gameMap;
+}
+
+// Classify a tile to a coarse GameElement based on hue; saturation reserved for future
+export function classifyElementByHue(hsl: HSLColor): GameElement {
+  const h = hsl.h;
+  const s = hsl.s;
+  // If near grayscale and very dark, consider wall to allow hand-authored maps
+  if (s < 0.05 && hsl.l < 0.15) return GameElement.WALL;
+  // Blue → water
+  if (h >= 190 && h <= 260) return GameElement.WATER;
+  // Green → grass
+  if (h >= 80 && h <= 160) return GameElement.GRASS;
+  // Orange → fire
+  if (h >= 20 && h <= 40) return GameElement.FIRE;
+  // Red → danger
+  if (h >= 340 || h <= 10) return GameElement.DANGER;
+  // Magenta → enemy
+  if (h >= 280 && h <= 320) return GameElement.ENEMY;
+  // Yellow → treasure
+  if (h >= 50 && h <= 70) return GameElement.TREASURE;
+  // Cyan → key
+  if (h >= 170 && h <= 185) return GameElement.KEY;
+  // Brown-ish low saturation orange → door
+  if (h >= 15 && h <= 35 && s < 0.35) return GameElement.DOOR;
+  // Light gray → stairs
+  if (s < 0.08 && hsl.l > 0.7) return GameElement.STAIRS;
+  return GameElement.FLOOR;
+}
+
+// Extract per-pixel HSL and derived height (meters) from the bitmap
+export function extractHslMaps(imageData: ImageData): {
+  heights: number[][];
+  hues: number[][];
+  saturations: number[][];
+  lightnesses: number[][];
+} {
+  const { data, width, height } = imageData;
+  const heights: number[][] = Array.from({ length: height }, () => new Array(width).fill(0));
+  const hues: number[][] = Array.from({ length: height }, () => new Array(width).fill(0));
+  const sats: number[][] = Array.from({ length: height }, () => new Array(width).fill(0));
+  const lights: number[][] = Array.from({ length: height }, () => new Array(width).fill(0));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+      const hsl = rgbToHsl(r, g, b);
+      hues[y][x] = hsl.h;
+      sats[y][x] = hsl.s;
+      lights[y][x] = hsl.l;
+      heights[y][x] = hsl.l * 100.0; // meters 0..100
+    }
+  }
+  return { heights, hues, saturations: sats, lightnesses: lights };
 }
 
 // Find player start position
